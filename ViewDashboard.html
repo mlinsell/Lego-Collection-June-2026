@@ -1,0 +1,135 @@
+<div class="view" id="view-analysis">
+
+  <div style="background:var(--white);border-bottom:1px solid var(--divider)">
+    <div class="count-reset" style="padding:6px 16px 0">
+      <span style="font-size:.75rem;font-weight:700;color:var(--grey-5)" id="aFilterCount"></span>
+      <button onclick="resetAnalysisFilters()" style="background:none;border:none;font-size:.75rem;font-weight:800;color:var(--grey-5);cursor:pointer;padding:4px 0">Reset filters</button>
+    </div>
+    <div class="filter-bar" style="grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto;top:0;position:relative">
+      <div class="filter-wrap">
+        <label class="filter-label">Status</label>
+        <select class="filter-select" id="aFStatus" onchange="renderAnalysis()">
+          <option value="">All Statuses</option>
+          <option>Built</option><option>Backlog</option><option>In Progress</option>
+          <option>Backlog - Opened</option><option>Awaiting Delivery</option>
+          <option>Investment</option><option>Parted Out</option>
+          <option>Sell (BNIB)</option><option>Sell (Used)</option>
+        </select>
+        <span class="filter-arrow">▼</span>
+      </div>
+      <div class="filter-wrap">
+        <label class="filter-label">Theme</label>
+        <select class="filter-select" id="aFTheme" onchange="renderAnalysis()">
+          <option value="">All Themes</option>
+        </select>
+        <span class="filter-arrow">▼</span>
+      </div>
+      <div class="filter-wrap">
+        <label class="filter-label">Ownership</label>
+        <select class="filter-select" id="aFOwnership" onchange="renderAnalysis()">
+          <option value="">All</option>
+          <option>Personal</option><option>Business</option><option>Charlotte</option>
+          <option>Lizzy</option><option>Investment</option><option>Awaiting Delivery</option>
+        </select>
+        <span class="filter-arrow">▼</span>
+      </div>
+      <div class="filter-wrap">
+        <label class="filter-label">Build Time</label>
+        <select class="filter-select" id="aFBuildCat" onchange="renderAnalysis()">
+          <option value="">All Build Times</option>
+          <option>⚡ Quick Build</option><option>☀️ Afternoon Project</option>
+          <option>🏠 Weekend Build</option><option>📅 Multi-Day Build</option>
+          <option>🏔️ Epic Build</option>
+        </select>
+        <span class="filter-arrow">▼</span>
+      </div>
+      <div class="filter-wrap">
+        <label class="filter-label">Location</label>
+        <select class="filter-select" id="aFLocation" onchange="renderAnalysis()">
+          <option value="">All Locations</option>
+        </select>
+        <span class="filter-arrow">▼</span>
+      </div>
+      <div class="filter-wrap">
+        <label class="filter-label">Condition</label>
+        <select class="filter-select" id="aFCondition" onchange="renderAnalysis()">
+          <option value="">All Conditions</option>
+        </select>
+        <span class="filter-arrow">▼</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="analysis-mode-collection">
+    <div class="analysis-section">
+      <div class="analysis-title">Collection at a glance</div>
+      <div id="aKpisCollection"></div>
+    </div>
+
+    <div class="analysis-section">
+      <div class="analysis-title">📅 Purchases vs Built - by year</div>
+      <div class="chart-wrap"><canvas id="chartYearly" height="200"></canvas></div>
+    </div>
+
+    <div class="analysis-section">
+      <div class="analysis-title">🎨 Sets & RRP by theme</div>
+      <div id="aThemeTable"></div>
+    </div>
+
+    <div class="analysis-section">
+      <div class="analysis-title">⏳ Oldest unbuilt sets</div>
+      <div class="chart-wrap" style="padding:0;overflow:hidden">
+        <table class="a-table" id="aOldestTable">
+          <thead><tr><th>Set</th><th>Theme</th><th>Purchased</th><th>Waiting</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="analysis-section" style="border-bottom:none">
+      <div class="analysis-title">👤 Ownership split</div>
+      <div class="chart-wrap"><canvas id="chartOwnership" height="180"></canvas></div>
+    </div>
+  </div>
+
+  <div id="analysis-mode-financial" style="display:none;">
+    <div class="analysis-section">
+      <div class="analysis-title">Financials at a glance</div>
+      <div id="aKpisFinancials"></div>
+    </div>
+
+<div class="analysis-section">
+  <div class="analysis-title">💰 Investment tracker - RRP vs Current Value</div>
+  <div class="chart-wrap" style="padding:0;overflow:hidden">
+    <table class="a-table" id="aInvestTable">
+      <thead>
+        <tr>
+          <th>Set</th>
+          <th>RRP</th>
+          <th>Value</th>
+          <th>Gain %</th>
+          <th>Gain £</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+    <div class="analysis-section">
+      <div class="analysis-title">🏪 Sets by retailer</div>
+      <div id="aRetailerTable"></div>
+    </div>
+
+    <div class="analysis-section" style="border-bottom:none">
+      <div class="analysis-title">💎 Top 10 sets by RRP</div>
+      <div class="chart-wrap" style="padding:0;overflow:hidden">
+        <table class="a-table" id="aTopRrpTable">
+          <thead><tr><th>#</th><th>Set</th><th>Theme</th><th>RRP</th><th>Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>

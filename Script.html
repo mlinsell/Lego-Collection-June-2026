@@ -1,0 +1,989 @@
+<script>
+window.onerror = function(msg, url, line) {
+  var spinner = document.getElementById('startSpinner');
+  if (spinner) spinner.style.display = 'none';
+  var status = document.getElementById('startStatus');
+  if (status) {
+    status.style.color = 'var(--red)';
+    status.innerHTML = '<b>Fatal Script Error:</b><br>' + msg + '<br>Line: ' + line;
+  }
+  return false;
+};
+
+let allSets=[], editRow=null, selStatus='';
+let loadTimer=null;
+let analysisMode = 'collection'; 
+
+const STATUS_CFG={
+  'Built':             {badge:'b-built',      color:'#1565C0',active:'s-active-built'},
+  'Backlog':           {badge:'b-backlog',     color:'#E65100',active:'s-active-backlog'},
+  'In Progress':       {badge:'b-inprogress',  color:'#BF360C',active:'s-active-inprogress'},
+  'Backlog - Opened':  {badge:'b-backlog-o',   color:'#880E4F',active:'s-active-backlog-o'},
+  'Awaiting Delivery': {badge:'b-awaiting',    color:'#6A1B9A',active:'s-active-awaiting'},
+  'Investment':        {badge:'b-investment',  color:'#2E7D32',active:'s-active-investment'},
+  'Parted Out':        {badge:'b-parted',      color:'#C62828',active:'s-active-parted'},
+  'Sell (BNIB)':       {badge:'b-sell-bnib',   color:'#00695C',active:'s-active-sell-bnib'},
+  'Sell (Used)':       {badge:'b-sell-used',   color:'#AD1457',active:'s-active-sell-used'},
+};
+
+function setSS(m){document.getElementById('startStatus').textContent=m}
+function showStartError(title,msg,steps){
+  document.getElementById('startSpinner').style.display='none';
+  document.getElementById('startStatus').style.display='none';
+  document.getElementById('errTitle').textContent=title;
+  document.getElementById('errMsg').textContent=msg;
+  document.getElementById('errSteps').innerHTML=(steps||[]).map(s=>`<li>${s}</li>`).join('');
+  document.getElementById('errCard').classList.add('show');
+}
+function hideOverlay(){
+  clearTimeout(loadTimer);
+  document.getElementById('startOverlay').style.display='none';
+  document.querySelectorAll('.nav-btn').forEach(b=>b.disabled=false);
+}
+function retryLoad(){
+  document.getElementById('errCard').classList.remove('show');
+  document.getElementById('startSpinner').style.display='';
+  document.getElementById('startStatus').style.display='';
+  document.getElementById('startOverlay').style.display='flex';
+  startLoad();
+}
+function startLoad(){
+  loadTimer=setTimeout(()=>showStartError('⏱ Timed out','Script took too long.',['Deploy → Manage deployments → edit → New version → Deploy']),12000);
+  setSS('Connecting…');
+  google.script.run
+    .withSuccessHandler(function(r){
+      if(!r.ok){clearTimeout(loadTimer);showStartError('⚠️ Spreadsheet not found',r.error||'',['Check the Spreadsheet ID in Code.gs']);return;}
+      if(!r.hasCollection){clearTimeout(loadTimer);showStartError('⚠️ "Collection" tab not found','Found: '+r.sheets.join(', '),['Rename your main inventory tab to "Collection"']);return;}
+      setSS('Loading your collection…');
+      google.script.run
+        .withSuccessHandler(function(res){
+          clearTimeout(loadTimer);
+          if(res.error){showStartError('⚠️ Error loading sets',res.error,[]);return;}
+          allSets=res.sets||[];
+          hideOverlay();renderDash();renderSets();
+        })
+        .withFailureHandler(function(e){clearTimeout(loadTimer);showStartError('⚠️ Script error',e.message,[]);})
+        .getSets();
+    })
+    .withFailureHandler(function(e){clearTimeout(loadTimer);showStartError('⚠️ Could not reach script',e.message,['Re-deploy as a new version and re-authorise']);})
+    .ping();
+}
+
+function imgTag(setNo,cls,sz){
+  sz=sz||68;
+  if(!setNo)return`<span class="set-img-fallback" style="display:block;font-size:${sz*.45}px">🧱</span>`;
+  const n=String(setNo).trim().replace(/\.0$/,'').replace(/-1$/,'');
+  return`<img src="https://images.brickset.com/sets/images/${n}-1.jpg" class="${cls||'set-img'}"
+    onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
+    loading="lazy" alt="" width="${sz}" height="${sz}">
+    <span class="set-img-fallback" style="font-size:${sz*.4}px">🧱</span>`;
+}
+
+function showView(name){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('view-'+name).classList.add('active');
+  document.getElementById('nav-'+name).classList.add('active');
+  
+  document.getElementById('hBack').style.display='none';
+  document.getElementById('hLogo').style.display='flex';
+  document.getElementById('hTitle').style.display='none';
+  
+  document.getElementById('hAdd').style.display=(name==='dash'||name==='collection')?'grid':'none';
+  document.getElementById('hToggleAnalysis').style.display=(name==='analysis')?'grid':'none';
+
+  if(name==='collection')renderSets();
+  if(name==='dash')renderDash();
+  if(name==='analysis')renderAnalysis();
+}
+
+function showAddForm(data,rowIdx){
+  clearForm();editRow=rowIdx||null;
+  if(data)fillForm(data);
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('view-form').classList.add('active');
+  
+  document.getElementById('hBack').style.display='flex';
+  document.getElementById('hLogo').style.display='none';
+  document.getElementById('hTitle').style.display='block';
+  document.getElementById('hTitle').textContent=editRow?'Edit Set':'Add Set';
+  
+  document.getElementById('hAdd').style.display='none';
+  document.getElementById('hToggleAnalysis').style.display='none';
+  document.getElementById('btnDel').style.display=editRow?'block':'none';
+  document.getElementById('btnSave').textContent=editRow?'Save Changes':'Save Set';
+}
+
+function goBack(){showView('collection');}
+
+function toggleAnalysisMode() {
+  if (analysisMode === 'collection') {
+    analysisMode = 'financial';
+    document.getElementById('analysis-mode-collection').style.display = 'none';
+    document.getElementById('analysis-mode-financial').style.display = 'block';
+    document.getElementById('hToggleAnalysis').textContent = '📊';
+  } else {
+    analysisMode = 'collection';
+    document.getElementById('analysis-mode-collection').style.display = 'block';
+    document.getElementById('analysis-mode-financial').style.display = 'none';
+    document.getElementById('hToggleAnalysis').textContent = '💰';
+  }
+}
+
+function renderDash(){
+  const total  =allSets.length;
+  const rrp    =allSets.reduce((a,s)=>a+(parseFloat(s.rrp)||0),0);
+  const pieces =allSets.reduce((a,s)=>a+(parseInt(s.pieces)||0),0);
+  const backlog=allSets.filter(s=>['Backlog','Backlog - Opened','In Progress'].includes(s.status)).length;
+
+  document.getElementById('heroCount').textContent=total+' set'+(total!==1?'s':'');
+  document.getElementById('statStrip').innerHTML=`
+    <div class="stat-cell"><div class="stat-val">${total}</div><div class="stat-lbl">Sets</div></div>
+    <div class="stat-cell"><div class="stat-val">£${Math.round(rrp/1000)}k</div><div class="stat-lbl">Total RRP</div></div>
+    <div class="stat-cell"><div class="stat-val">${Math.round(pieces/1000)}k</div><div class="stat-lbl">Pieces</div></div>
+    <div class="stat-cell"><div class="stat-val">${backlog}</div><div class="stat-lbl">Backlog</div></div>`;
+
+  const statusOrder=['Built','Backlog','In Progress','Backlog - Opened','Awaiting Delivery','Investment','Parted Out','Sell (BNIB)','Sell (Used)'];
+  const counts={};allSets.forEach(s=>{counts[s.status]=(counts[s.status]||0)+1;});
+  document.getElementById('statusList').innerHTML=statusOrder.filter(s=>counts[s]).map(s=>{
+    const cfg=STATUS_CFG[s]||{color:'#888'};
+    return`<div class="status-item" onclick="filterByStatus('${s.replace(/'/g,"\\'")}')">
+      <span class="status-pip" style="background:${cfg.color}"></span>
+      <span class="status-name">${s}</span>
+      <div class="status-track"><div class="status-fill" style="width:${total?counts[s]/total*100:0}%;background:${cfg.color}"></div></div>
+      <span class="status-num">${counts[s]}</span>
+      <span style="color:var(--grey-3);font-size:.75rem">›</span>
+    </div>`;
+  }).join('');
+
+  const cats=['⚡ Quick','☀️ Aftn.','🏠 Wknd','📅 Multi','🏔️ Epic'];
+  const full=['⚡ Quick Build','☀️ Afternoon Project','🏠 Weekend Build','📅 Multi-Day Build','🏔️ Epic Build'];
+  document.getElementById('buildStrip').innerHTML=cats.map((c,i)=>{
+    const cnt=allSets.filter(s=>s.buildCat===full[i]).length;
+    return`<div class="build-cell" onclick="filterByBuildCat('${full[i]}')" style="cursor:${cnt?'pointer':'default'};transition:background .1s" onmouseenter="if(${cnt})this.style.background='var(--grey-1)'" onmouseleave="this.style.background=''"><div class="build-num">${cnt}</div><div class="build-lbl">${c}</div></div>`;
+  }).join('');
+
+  const recent=[...allSets].slice(-10).reverse();
+  document.getElementById('recentRows').innerHTML=recent.length?recent.map(setRowHtml).join('')
+    :'<div class="empty"><p>No sets yet — tap + to add your first</p></div>';
+}
+function filterByStatus(s){showView('collection');document.getElementById('fStatus').value=s;filterSets();}
+function filterByBuildCat(cat){showView('collection');document.getElementById('fBuildCat').value=cat;filterSets();}
+
+function buildFilterDropdowns(){
+  const themes=[...new Set(allSets.map(s=>s.theme).filter(Boolean))].sort();
+  const tSel=document.getElementById('fTheme');const tCur=tSel.value;
+  tSel.innerHTML='<option value="">All Themes</option>'+themes.map(t=>`<option${t===tCur?' selected':''}>${t}</option>`).join('');
+
+  const locs=[...new Set(allSets.map(s=>s.location).filter(Boolean))].sort();
+  const lSel=document.getElementById('fLocation');const lCur=lSel.value;
+  lSel.innerHTML='<option value="">All Locations</option>'+locs.map(l=>`<option${l===lCur?' selected':''}>${l}</option>`).join('');
+  
+  const rets=[...new Set(allSets.map(s=>s.retailer).filter(Boolean))].sort();
+  const rSel=document.getElementById('fRetailer');const rCur=rSel.value;
+  rSel.innerHTML='<option value="">All Retailers</option>'+rets.map(r=>`<option${r===rCur?' selected':''}>${r}</option>`).join('');
+  
+  const conds=[...new Set(allSets.map(s=>s.condition).filter(Boolean))].sort();
+  const cSel=document.getElementById('fCondition');
+  if(cSel) {
+    const cCur=cSel.value;
+    cSel.innerHTML='<option value="">All Conditions</option>'+conds.map(c=>`<option${c===cCur?' selected':''}>${c}</option>`).join('');
+  }
+}
+
+function filterSets(){
+  const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  
+  const q          = (document.getElementById('srch').value||'').toLowerCase();
+  const fStatus    = val('fStatus');
+  const fTheme     = val('fTheme');
+  const fOwn       = val('fOwnership');
+  const fBuildCat  = val('fBuildCat');
+  const fLocation  = val('fLocation');
+  const fRetailer  = val('fRetailer');
+  const fCondition = val('fCondition');
+  const fMissing   = val('fMissing');
+  const fSort      = val('fSort');
+
+  ['fStatus','fTheme','fOwnership','fBuildCat','fLocation','fRetailer','fCondition','fMissing','fSort'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.classList.toggle('active',!!el.value);
+  });
+
+  let filtered=allSets.filter(s=>{
+    if(fStatus   && s.status!==fStatus)     return false;
+    if(fTheme    && s.theme!==fTheme)       return false;
+    if(fOwn      && s.ownership!==fOwn)     return false;
+    if(fBuildCat && s.buildCat!==fBuildCat) return false;
+    if(fLocation && s.location!==fLocation) return false;
+    if(fRetailer && s.retailer!==fRetailer) return false;
+    if(fCondition&& s.condition!==fCondition) return false;
+    if(fMissing==='price'    && (s.price    !=='' && s.price    !=null)) return false;
+    if(fMissing==='retailer' && (s.retailer !=='' && s.retailer !=null)) return false;
+    if(fMissing==='ownership'&& (s.ownership!=='' && s.ownership!=null)) return false;
+    if(fMissing==='location' && (s.location !=='' && s.location !=null)) return false;
+    if(q && !s.name.toLowerCase().includes(q)
+         && !(s.setNo||'').toLowerCase().includes(q)
+         && !(s.theme||'').toLowerCase().includes(q)
+         && !(s.purpose||'').toLowerCase().includes(q)
+         && !(s.location||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  if(fSort==='rrp-desc')    filtered.sort((a,b)=>(parseFloat(b.rrp)||0)  -(parseFloat(a.rrp)||0));
+  if(fSort==='pieces-desc') filtered.sort((a,b)=>(parseInt(b.pieces)||0) -(parseInt(a.pieces)||0));
+  if(fSort==='name-asc')    filtered.sort((a,b)=>a.name.localeCompare(b.name));
+  if(fSort==='price-desc')  filtered.sort((a,b)=>(parseFloat(b.price)||0)-(parseFloat(a.price)||0));
+
+  const countEl=document.getElementById('collectionCount');
+  if(countEl) countEl.textContent=filtered.length===allSets.length?`${allSets.length} sets`:`${filtered.length} of ${allSets.length} sets`;
+
+  document.getElementById('setRows').innerHTML=filtered.length?filtered.map(setRowHtml).join('')
+    :'<div class="empty"><div class="e-icon">🔍</div><p>No sets match these filters.</p></div>';
+}
+
+function resetFilters(){
+  ['fStatus','fTheme','fOwnership','fBuildCat','fLocation','fRetailer','fCondition','fMissing','fSort']
+    .forEach(id=> { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('srch').value='';
+  filterSets();
+}
+
+function renderSets(){buildFilterDropdowns();filterSets();}
+
+function setRowHtml(s){
+  const cfg=STATUS_CFG[s.status]||{badge:'b-theme'};
+  const n=String(s.setNo||'').replace(/\.0$/,'');
+  const price=s.price!==''?parseFloat(s.price):null;
+  const rrp  =s.rrp  !==''?parseFloat(s.rrp)  :null;
+  const priceStr=price!=null?`£${price.toFixed(2)}`:'';
+  const rrpStr  =rrp  !=null?`£${rrp.toFixed(2)}`  :'';
+  const discountPct=(price!=null&&rrp!=null&&rrp>0&&price<rrp)
+    ?Math.round((rrp-price)/rrp*100):null;
+  
+  const builtTick = s.status === 'Built'
+    ? '<div class="built-tick"><s'+'vg viewBox="0 0 12 12" fill="none"><poly'+'line points="2,6 5,9 10,3" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></s'+'vg></div>'
+    : '';
+
+  return`<div class="set-row" onclick="openDetail(${s.rowIndex})">
+    <div class="set-img-wrap">${imgTag(n,'set-img',88)}${builtTick}</div>
+    <div class="set-info">
+      <div class="set-num">#${n||'—'}</div>
+      <div class="set-name">${s.name}</div>
+      <div class="set-badges">
+        ${s.location?`<span class="badge b-theme" style="font-size:.62rem">📍 ${s.location}</span>`:''}
+        ${s.status  ?`<span class="badge ${cfg.badge}">${s.status}</span>`:''}
+        ${s.purpose ?`<span class="badge b-purpose">${s.purpose}</span>`:''}
+        ${s.theme   ?`<span class="badge b-theme">${s.theme}</span>`:''}
+        ${s.buildCat?`<span class="badge b-cat">${s.buildCat}</span>`:''}
+      </div>
+    </div>
+    <div class="set-price-col">
+      ${priceStr?`<span class="set-price">${priceStr}</span>`:''}
+      ${rrpStr&&rrpStr!==priceStr?`<span style="font-size:.7rem;color:var(--grey-3);font-weight:600;white-space:nowrap">RRP ${rrpStr}</span>`:''}
+      ${discountPct?`<span style="font-size:.7rem;color:var(--grey-5);font-weight:700;white-space:nowrap">-${discountPct}%</span>`:''}
+      <span class="set-chevron">›</span>
+    </div>
+  </div>`;
+}
+
+function openDetail(rowIndex){
+  const s=allSets.find(x=>x.rowIndex===rowIndex);if(!s)return;
+  const cfg=STATUS_CFG[s.status]||{badge:'b-theme'};
+  const n=String(s.setNo||'').replace(/\.0$/,'');
+  const rows=[
+    ['Theme',s.theme],['Year',s.year?String(s.year).replace(/\.0$/,''):''],
+    ['Pieces',s.pieces?String(Math.round(s.pieces)):''],
+    ['Status',s.status],['Location',s.location],['Purpose',s.purpose],
+    ['Ownership',s.ownership],['Keep/Sell',s.keepSell],['Condition',s.condition],
+    ['Built Date',s.builtDate],['Retailer',s.retailer],['Purchase Date',s.purchaseDate],
+    ['Price Paid',s.price!==''?`£${parseFloat(s.price).toFixed(2)}`:''],
+    ['UK RRP',s.rrp!==''?`£${parseFloat(s.rrp).toFixed(2)}`:''],
+    ['BL New',s.blNew!==''?`£${parseFloat(s.blNew).toFixed(2)}`:''],
+    ['BL Used',s.blUsed!==''?`£${parseFloat(s.blUsed).toFixed(2)}`:''],
+    ['Est. Build',s.buildHrs!==''?`${s.buildHrs}h · ${s.buildCat}`:''],
+    ['Availability',s.availability],
+  ].filter(([,v])=>v&&v!=='');
+  document.getElementById('detailContent').innerHTML=`
+    <div class="sheet-header">
+      <div class="sheet-img-wrap">${imgTag(n,'sheet-img',80)}</div>
+      <div style="flex:1">
+        <div class="sheet-set-num">#${n||'—'}</div>
+        <div class="sheet-set-name">${s.name}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">
+          ${s.status?`<span class="badge ${cfg.badge}">${s.status}</span>`:''}
+          ${s.purpose?`<span class="badge b-purpose">${s.purpose}</span>`:''}
+          ${s.buildCat?`<span class="badge b-cat">${s.buildCat}</span>`:''}
+        </div>
+      </div>
+    </div>
+    <div class="detail-rows">
+      ${rows.map(([l,v])=>`<div class="detail-row"><span class="dl">${l}</span><span class="dv">${v}</span></div>`).join('')}
+    </div>
+    <div class="sheet-actions">
+      <button class="btn-sheet btn-edit" onclick="closeDetail();showAddForm(${JSON.stringify(s).replace(/"/g,'&quot;')},${rowIndex})">✏️ Edit</button>
+      <button class="btn-sheet btn-delete" onclick="closeDetail();delSet(${rowIndex})">🗑️ Delete</button>
+    </div>`;
+  document.getElementById('detailOL').classList.add('open');
+}
+function closeDetail(e){if(!e||e.target===document.getElementById('detailOL'))document.getElementById('detailOL').classList.remove('open');}
+
+function clearForm(){
+  ['f-setNo','f-name','f-theme','f-year','f-pieces','f-location','f-builtDate',
+   'f-purpose','f-price','f-purchaseDate', 'f-rrp'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  document.getElementById('f-ownership').value='';
+  document.getElementById('f-retailer').value='';
+  document.getElementById('f-keepSell').value='';
+  document.getElementById('status-error').style.display = 'none';
+  document.getElementById('f-name').style.borderColor = '';
+  selStatus='';
+  document.querySelectorAll('.s-btn').forEach(b=>b.className='s-btn');
+  document.getElementById('buildPrev').textContent='—';
+  document.getElementById('lookupResult').className='lookup-result';
+}
+
+function fillForm(s){
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v||'';};
+  const n=String(s.setNo||'').replace(/\.0$/,'');
+  set('f-setNo',n);set('f-name',s.name);
+  set('f-theme',s.theme);set('f-year',s.year?String(s.year).replace(/\.0$/,''):'');
+  set('f-pieces',s.pieces?String(Math.round(s.pieces)):'');
+  set('f-location',s.location);set('f-builtDate',s.builtDate);
+  set('f-purpose',s.purpose);set('f-price',s.price);
+  set('f-purchaseDate',s.purchaseDate);
+  set('f-rrp', s.rrp); 
+  setSelVal('f-retailer',s.retailer);setSelVal('f-ownership',s.ownership);setSelVal('f-keepSell',s.keepSell);
+  if(s.status)pickStatus(s.status);
+  updateBuildPreview();
+}
+
+function setSelVal(id,val){const s=document.getElementById(id);for(let o of s.options){if(o.value===val){s.value=val;return;}}}
+
+function pickStatus(status){
+  selStatus=status;
+  document.getElementById('status-error').style.display = 'none';
+  const cfg=STATUS_CFG[status]||{};
+  const labelMap={
+    '🏗️ Built':'Built','📦 Backlog':'Backlog','🔨 In Progress':'In Progress',
+    '📂 Backlog - Opened':'Backlog - Opened','🚚 Awaiting Delivery':'Awaiting Delivery',
+    '💰 Investment':'Investment','🔩 Parted Out':'Parted Out',
+    '🏷️ Sell (BNIB)':'Sell (BNIB)','🏷️ Sell (Used)':'Sell (Used)',
+  };
+  document.querySelectorAll('.s-btn').forEach(b=>{
+    const bs=labelMap[b.textContent.trim()];
+    b.className='s-btn'+(bs===status&&cfg.active?' '+cfg.active:'');
+  });
+}
+
+function updateBuildPreview(){
+  const p=parseInt(document.getElementById('f-pieces').value)||0;
+  const t=document.getElementById('f-theme').value||'';
+  if(!p){document.getElementById('buildPrev').textContent='—';return;}
+  const m={'Technic':2,'Modular Buildings':1.5,'Icons':1.5,'Architecture':1.5,'Creator Expert':1.5,
+            'Ideas':1.2,'Disney':1.2,'Star Wars':1.2,'Harry Potter':1.2,'Winter Village':1.2};
+  const hrs=Math.round(p/10*(m[t]||1)/60*10)/10;
+  const cat=hrs<1?'⚡ Quick':hrs<3?'☀️ Afternoon':hrs<8?'🏠 Weekend':hrs<20?'📅 Multi-Day':'🏔️ Epic';
+  document.getElementById('buildPrev').textContent=hrs+'h · '+cat;
+}
+
+function getFormData(){
+  return{
+    setNo:       document.getElementById('f-setNo').value.trim(),
+    name:        document.getElementById('f-name').value.trim(),
+    status:      selStatus,
+    location:    document.getElementById('f-location').value.trim(),
+    builtDate:   document.getElementById('f-builtDate').value,
+    retailer:    document.getElementById('f-retailer').value,
+    purchaseDate:document.getElementById('f-purchaseDate').value,
+    price:       document.getElementById('f-price').value,
+    ownership:   document.getElementById('f-ownership').value,
+    keepSell:    document.getElementById('f-keepSell').value,
+    purpose:     document.getElementById('f-purpose').value.trim(),
+    theme:       document.getElementById('f-theme').value.trim(),
+    year:        document.getElementById('f-year').value.trim(),
+    pieces:      document.getElementById('f-pieces').value,
+    rrp:         document.getElementById('f-rrp').value
+  };
+}
+
+function submitForm(){
+  const d=getFormData();
+  let hasError = false;
+  
+  const nameField = document.getElementById('f-name');
+  if(!d.name) {
+    nameField.style.borderColor = 'var(--red)';
+    showToast('⚠️ Set Name is required');
+    hasError = true;
+  } else {
+    nameField.style.borderColor = '';
+  }
+  
+  const statusErr = document.getElementById('status-error');
+  if(!d.status){
+    statusErr.style.display = 'block';
+    showToast('⚠️ Please select a Built Status');
+    hasError = true;
+  } else {
+    statusErr.style.display = 'none';
+  }
+  
+  if (hasError) return;
+
+  const btn=document.getElementById('btnSave');
+  btn.disabled=true;
+  btn.textContent='Saving…';
+  
+  const cb=r=>{
+    btn.disabled=false;
+    btn.textContent=editRow?'Save Changes':'Save Set';
+    if(r.error){showToast('⚠️ '+r.error);return;}
+    showToast(editRow?'✅ Updated!':'✅ Added!');
+    
+    // Optimistic UI Update
+    d.theme = document.getElementById('f-theme').value;
+    d.pieces = document.getElementById('f-pieces').value;
+    d.year = document.getElementById('f-year').value;
+    d.rrp = document.getElementById('f-rrp').value;
+    
+    const p = parseInt(d.pieces) || 0;
+    if(p > 0) {
+        const m={'Technic':2,'Modular Buildings':1.5,'Icons':1.5,'Architecture':1.5,'Creator Expert':1.5,'Ideas':1.2,'Disney':1.2,'Star Wars':1.2,'Harry Potter':1.2,'Winter Village':1.2};
+        const hrs=Math.round(p/10*(m[d.theme]||1)/60*10)/10;
+        d.buildCat=hrs<1?'⚡ Quick':hrs<3?'☀️ Afternoon':hrs<8?'🏠 Weekend':hrs<20?'📅 Multi-Day':'🏔️ Epic';
+    }
+
+    if(editRow) {
+        const idx = allSets.findIndex(x => x.rowIndex === editRow);
+        if(idx > -1) Object.assign(allSets[idx], d);
+    } else {
+        d.rowIndex = r.rowIndex || 999999; 
+        allSets.push(d);
+    }
+    
+    goBack(); 
+    renderSets(); 
+    renderDash();
+    
+    // Silently fetch to re-sync VLOOKUPS and accurate RRP from the server
+    google.script.run.withSuccessHandler(res => {
+        if(!res.error) { allSets = res.sets || []; renderSets(); renderDash(); }
+    }).getSets();
+  };
+  
+  const fb=e=>{
+    btn.disabled=false;
+    btn.textContent=editRow?'Save Changes':'Save Set';
+    showToast('⚠️ '+e.message);
+  };
+  
+  if(editRow) google.script.run.withSuccessHandler(cb).withFailureHandler(fb).updateSet(editRow,d);
+  else        google.script.run.withSuccessHandler(cb).withFailureHandler(fb).addSet(d);
+}
+
+function confirmDelete(){if(!editRow)return;if(confirm('Delete this set from your collection?'))delSet(editRow);}
+function delSet(rowIndex){
+  google.script.run
+    .withSuccessHandler(r=>{if(r.error){showToast('⚠️ '+r.error);return;}showToast('🗑️ Deleted');loadAll();showView('collection');})
+    .withFailureHandler(e=>showToast('⚠️ '+e.message))
+    .deleteSet(rowIndex);
+}
+
+function doLookup(){
+  const setNo=document.getElementById('f-setNo').value.trim();
+  if(!setNo){showToast('⚠️ Enter a set number first');return;}
+  const btn=document.getElementById('btnLookup');
+  const res=document.getElementById('lookupResult');
+  btn.classList.add('loading');btn.disabled=true;
+  res.className='lookup-result';
+  google.script.run
+    .withSuccessHandler(function(r){
+      btn.classList.remove('loading');btn.disabled=false;
+      if(r.error){res.textContent='⚠️ Set not found via API';res.className='lookup-result err show';return;}
+      setAndFlash('f-name', r.name);
+      setAndFlash('f-theme', r.rawTheme);
+      setAndFlash('f-year', r.year);
+      setAndFlash('f-pieces', r.pieces);
+      setAndFlash('f-rrp', r.rrp);
+      updateBuildPreview();
+      res.textContent='✅ Found! Data auto-filled.';
+      res.className='lookup-result ok show';
+    })
+    .withFailureHandler(function(e){btn.classList.remove('loading');btn.disabled=false;res.textContent='⚠️ '+e.message;res.className='lookup-result err show';})
+    .lookupSet(setNo);
+}
+function setAndFlash(id,val){const el=document.getElementById(id);if(el){el.value=val;el.classList.add('autofilled');setTimeout(()=>el.classList.remove('autofilled'),2500);}}
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2800);}
+
+// ── Analysis ──────────────────────────────────────────────────────────
+let chartYearly=null, chartOwnership=null;
+
+function goToRetailer(retailerName) {
+  if (retailerName === 'Unknown') {
+    document.getElementById('fRetailer').value = '';
+    document.getElementById('fMissing').value = 'retailer';
+  } else {
+    document.getElementById('fRetailer').value = retailerName;
+    document.getElementById('fMissing').value = '';
+  }
+  showView('collection');
+  filterSets();
+}
+
+function goToTheme(themeName) {
+  document.getElementById('fTheme').value = themeName;
+  showView('collection');
+  filterSets();
+}
+
+function getAnalysisSets(){
+  const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  const fStatus    = val('aFStatus');
+  const fTheme     = val('aFTheme');
+  const fOwn       = val('aFOwnership');
+  const fBuildCat  = val('aFBuildCat');
+  const fLocation  = val('aFLocation');
+  const fCondition = val('aFCondition');
+  
+  ['aFStatus','aFTheme','aFOwnership','aFBuildCat','aFLocation','aFCondition'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.classList.toggle('active',!!el.value);
+  });
+  return allSets.filter(s=>{
+    if(fStatus   && s.status!==fStatus)     return false;
+    if(fTheme    && s.theme!==fTheme)       return false;
+    if(fOwn      && s.ownership!==fOwn)     return false;
+    if(fBuildCat && s.buildCat!==fBuildCat) return false;
+    if(fLocation && s.location!==fLocation) return false;
+    if(fCondition && s.condition!==fCondition) return false;
+    return true;
+  });
+}
+
+function resetAnalysisFilters(){
+  ['aFStatus','aFTheme','aFOwnership','aFBuildCat','aFLocation','aFCondition'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  renderAnalysis();
+}
+
+function renderAnalysis(){
+  const sets=getAnalysisSets();
+
+  const themes=[...new Set(allSets.map(s=>s.theme).filter(Boolean))].sort();
+  const tSel=document.getElementById('aFTheme');
+  if(tSel) {
+    const tCur=tSel.value;
+    tSel.innerHTML='<option value="">All Themes</option>'+themes.map(t=>`<option${t===tCur?' selected':''}>${t}</option>`).join('');
+  }
+
+  const locs=[...new Set(allSets.map(s=>s.location).filter(Boolean))].sort();
+  const lSel=document.getElementById('aFLocation');
+  if(lSel) {
+    const lCur=lSel.value;
+    lSel.innerHTML='<option value="">All Locations</option>'+locs.map(l=>`<option${l===lCur?' selected':''}>${l}</option>`).join('');
+  }
+
+  const conds=[...new Set(allSets.map(s=>s.condition).filter(Boolean))].sort();
+  const cSel=document.getElementById('aFCondition');
+  if(cSel) {
+    const cCur=cSel.value;
+    cSel.innerHTML='<option value="">All Conditions</option>'+conds.map(c=>`<option${c===cCur?' selected':''}>${c}</option>`).join('');
+  }
+
+  const countEl=document.getElementById('aFilterCount');
+  if(countEl) countEl.textContent=sets.length===allSets.length?`${allSets.length} sets`:`${sets.length} of ${allSets.length} sets`;
+
+  const totalRRP   =sets.reduce((a,s)=>a+(parseFloat(s.rrp)||0),0);
+  const totalPrice =sets.reduce((a,s)=>a+(parseFloat(s.price)||0),0);
+  const totalBL    =sets.reduce((a,s)=>a+(parseFloat(s.blUsed)||0),0);
+  const totalBLNew =sets.reduce((a,s)=>a+(parseFloat(s.blNew)||0),0);
+  
+  const totalValue =sets.reduce((a,s)=>{
+    const isNew = (s.condition||'').trim().toLowerCase() === 'new';
+    return a + (isNew ? (parseFloat(s.blNew)||0) : (parseFloat(s.blUsed)||0));
+  },0);
+
+  const builtCount =sets.filter(s=>s.status==='Built').length;
+  const backlogSets=sets.filter(s=>['Backlog','Backlog - Opened','In Progress'].includes(s.status));
+  const backlogHrs =backlogSets.reduce((a,s)=>a+(parseFloat(s.buildHrs)||0),0);
+
+  const fmtNum = num => num < 1000 ? Math.round(num) : Math.round(num / 1000) + 'k';
+  
+  let discHtml = '—';
+  if (totalRRP > 0 && totalPrice > 0) {
+    const diff = Math.round((totalRRP - totalPrice) / totalRRP * 100);
+    discHtml = diff > 0 ? `-${diff}%` : (diff < 0 ? `+${Math.abs(diff)}%` : `0%`);
+  }
+  
+  let retTotalHtml = '—';
+  if (totalPrice > 0 && totalValue > 0) {
+    const diffTotal = Math.round((totalValue - totalPrice) / totalPrice * 100);
+    const signTotal = diffTotal > 0 ? '+' : '';
+    const colTotal = diffTotal > 0 ? 'var(--green)' : (diffTotal < 0 ? 'var(--red)' : 'var(--grey-5)');
+    retTotalHtml = `<span style="color:${colTotal};font-weight:800">${signTotal}${diffTotal}%</span>`;
+  }
+  
+  let retNewHtml = '—';
+  if (totalPrice > 0 && totalBLNew > 0) {
+    const diffNew = Math.round((totalBLNew - totalPrice) / totalPrice * 100);
+    const signNew = diffNew > 0 ? '+' : '';
+    const colNew = diffNew > 0 ? 'var(--green)' : (diffNew < 0 ? 'var(--red)' : 'var(--grey-5)');
+    retNewHtml = `<span style="color:${colNew};font-weight:800">${signNew}${diffNew}%</span>`;
+  }
+  
+  let retHtml = '—';
+  if (totalPrice > 0 && totalBL > 0) {
+    const diff = Math.round((totalBL - totalPrice) / totalPrice * 100);
+    const sign = diff > 0 ? '+' : '';
+    const col = diff > 0 ? 'var(--green)' : (diff < 0 ? 'var(--red)' : 'var(--grey-5)');
+    retHtml = `<span style="color:${col};font-weight:800">${sign}${diff}%</span>`;
+  }
+
+  const backlogPct = sets.length ? Math.round(backlogSets.length / sets.length * 100) : 0;
+  const builtPct = sets.length ? Math.round(builtCount / sets.length * 100) : 0;
+
+  const kpiCollection = document.getElementById('aKpisCollection');
+  if (kpiCollection) {
+    kpiCollection.innerHTML=`
+      <div class="stat-strip" style="background:var(--white);border:1px solid var(--divider);border-radius:var(--radius-sm);grid-template-columns:repeat(3,1fr)">
+        <div class="stat-cell">
+          <div class="stat-val green">${builtCount}</div>
+          <div class="stat-lbl">Sets Built</div>
+          <div style="font-size:.68rem;color:var(--grey-5);font-weight:600;margin-top:2px">${builtPct}% of collection</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-val accent">${backlogSets.length}</div>
+          <div class="stat-lbl">Backlog Sets</div>
+          <div style="font-size:.68rem;color:var(--grey-5);font-weight:600;margin-top:2px">${backlogPct}% of collection</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-val accent">${Math.round(backlogHrs)}h</div>
+          <div class="stat-lbl">Backlog Hours</div>
+        </div>
+      </div>`;
+  }
+
+  const kpiFinancials = document.getElementById('aKpisFinancials');
+  if (kpiFinancials) {
+    const totalGain = totalValue - totalPrice;
+    const gainColor = totalGain >= 0 ? 'var(--green)' : 'var(--red)';
+    const gainSign = totalGain > 0 ? '+' : '';
+
+    kpiFinancials.innerHTML=`
+      <div class="stat-strip" style="background:var(--white);border:1px solid var(--divider);border-radius:var(--radius-sm);grid-template-columns:repeat(6,1fr)">
+        <div class="stat-cell" style="padding:14px 4px">
+          <div class="stat-val">£${fmtNum(totalRRP)}</div>
+          <div class="stat-lbl">Total RRP</div>
+        </div>
+        <div class="stat-cell" style="padding:14px 4px">
+          <div class="stat-val">£${fmtNum(totalPrice)}</div>
+          <div class="stat-lbl">Price Paid</div>
+          <div style="font-size:.68rem;color:var(--grey-5);font-weight:600;margin-top:2px">${discHtml}</div>
+        </div>
+        <div class="stat-cell" style="padding:14px 4px">
+          <div class="stat-val">£${fmtNum(totalValue)}</div>
+          <div class="stat-lbl">Value</div>
+          <div style="font-size:.68rem;color:var(--grey-5);font-weight:600;margin-top:2px">${retTotalHtml}</div>
+        </div>
+        <div class="stat-cell" style="padding:14px 4px">
+          <div class="stat-val" style="color:${gainColor}">£${gainSign}${fmtNum(totalGain)}</div>
+          <div class="stat-lbl">Gain/Loss</div>
+        </div>
+        <div class="stat-cell" style="padding:14px 4px">
+          <div class="stat-val">£${fmtNum(totalBLNew)}</div>
+          <div class="stat-lbl">Val. New</div>
+        </div>
+        <div class="stat-cell" style="padding:14px 4px">
+          <div class="stat-val">£${fmtNum(totalBL)}</div>
+          <div class="stat-lbl">Val. Used</div>
+        </div>
+      </div>`;
+  }
+
+  // ── 1. Yearly purchases vs built ──────────────────────────────────────────
+  const BACKLOG_STATUSES = ['Backlog','Backlog - Opened','In Progress'];
+  const yearsBought={'Pre-2020': 0}, yearsBuilt={'Pre-2020': 0};
+  let unplottableBacklog = 0;
+
+  sets.forEach(s=>{
+    const isBacklog = BACKLOG_STATUSES.includes(s.status);
+    const isBuilt   = s.status === 'Built';
+    
+    if(isBacklog || isBuilt){
+      let pyStr = s.purchaseDate ? s.purchaseDate.substring(0,4) : (s.year ? String(s.year).replace(/\.0$/,'') : '');
+      let byStr = '';
+      if(isBuilt){
+        byStr = s.builtDate ? s.builtDate.substring(0,4) : pyStr;
+        if(!pyStr && byStr) pyStr = byStr; 
+      }
+      let py = parseInt(pyStr);
+      if(!isNaN(py)){
+        if (py < 2020) yearsBought['Pre-2020']++;
+        else yearsBought[py] = (yearsBought[py] || 0) + 1;
+      } else if (isBacklog) {
+        unplottableBacklog++; 
+      }
+      let by = parseInt(byStr);
+      if(isBuilt && !isNaN(by)){
+        if (by < 2020) yearsBuilt['Pre-2020']++;
+        else yearsBuilt[by] = (yearsBuilt[by] || 0) + 1;
+      }
+    }
+  });
+
+  const currentYear = new Date().getFullYear();
+  const extractedYears = [
+    ...Object.keys(yearsBought).filter(k=>k!=='Pre-2020').map(Number),
+    ...Object.keys(yearsBuilt).filter(k=>k!=='Pre-2020').map(Number)
+  ];
+  const maxYear = extractedYears.length ? Math.max(currentYear, ...extractedYears) : currentYear;
+
+  const allYears = ['Pre-2020'];
+  for(let y=2020; y<=maxYear; y++) allYears.push(String(y));
+
+  let cumulative = unplottableBacklog;
+  const cumulativeBacklog=allYears.map(y=>{
+    cumulative += (yearsBought[y]||0) - (yearsBuilt[y]||0);
+    return Math.max(0, cumulative);
+  });
+
+  if(chartYearly){chartYearly.destroy();}
+  const cyCanvas = document.getElementById('chartYearly');
+  if(cyCanvas) {
+    chartYearly=new Chart(cyCanvas,{
+      type:'bar',
+      data:{
+        labels:allYears,
+        datasets:[
+          {type:'bar', label:'Purchased',        data:allYears.map(y=>yearsBought[y]||0), backgroundColor:'#111111',  borderRadius:3, barPercentage:.7, categoryPercentage:.8, yAxisID:'y'},
+          {type:'bar', label:'Built',             data:allYears.map(y=>yearsBuilt[y]||0),  backgroundColor:'#FFD600',  borderRadius:3, barPercentage:.7, categoryPercentage:.8, yAxisID:'y'},
+          {type:'line',label:'Cumulative backlog',data:cumulativeBacklog,
+            borderColor:'#E53935',backgroundColor:'rgba(229,57,53,.1)',
+            borderWidth:2.5,pointRadius:0,pointHoverRadius:4,pointHoverBackgroundColor:'#E53935',
+            tension:.3,fill:true,yAxisID:'y2'},
+        ]
+      },
+      options:{
+        responsive:true,maintainAspectRatio:true,
+        interaction:{mode:'index',intersect:false},
+        plugins:{
+          legend:{position:'bottom',labels:{font:{family:"'Barlow',sans-serif",size:11},boxWidth:12,padding:14}},
+          tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y}`}},
+        },
+        scales:{
+          x:  {grid:{display:false},ticks:{font:{family:"'Barlow',sans-serif",size:10}}},
+          y:  {position:'left', grid:{color:'#EBEBEB'},ticks:{font:{family:"'Barlow',sans-serif",size:10},stepSize:5},title:{display:true,text:'Sets / year',font:{size:9,family:"'Barlow',sans-serif"},color:'#888'}},
+          y2: {position:'right',grid:{display:false},ticks:{font:{family:"'Barlow',sans-serif",size:10}},title:{display:true,text:'Backlog total',font:{size:9,family:"'Barlow',sans-serif"},color:'#E53935'},min:0},
+        }
+      }
+    });
+  }
+
+  // ── 2. Theme table ─────────────────────────────────────────────────────────
+  const themeData={};
+  sets.forEach(s=>{
+    if(!s.theme)return;
+    if(!themeData[s.theme])themeData[s.theme]={count:0,rrp:0,built:0};
+    themeData[s.theme].count++;
+    themeData[s.theme].rrp+=(parseFloat(s.rrp)||0);
+    if(s.status==='Built')themeData[s.theme].built++;
+  });
+  const themeRows=Object.entries(themeData).sort((a,b)=>b[1].count-a[1].count);
+  const maxCount=themeRows[0]?themeRows[0][1].count:1;
+  const aThemeTable = document.getElementById('aThemeTable');
+  if(aThemeTable) {
+    aThemeTable.innerHTML=`
+      <table class="a-table">
+        <thead><tr><th>Theme</th><th>Sets</th><th>RRP</th><th>Built</th></tr></thead>
+        <tbody>${themeRows.map(([theme,d])=>{
+          const clickTheme = theme.replace(/'/g,"\\'");
+          return `
+          <tr>
+            <td style="font-weight:700;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span onclick="goToTheme('${clickTheme}')" style="cursor:pointer">${theme}</span></td>
+            <td><div class="a-bar-wrap"><div class="a-bar-track"><div class="a-bar-fill" style="width:${Math.round(d.count/maxCount*100)}%"></div></div><span class="a-num">${d.count}</span></div></td>
+            <td class="a-num">£${d.rrp<1000?Math.round(d.rrp):(d.rrp/1000).toFixed(1)+'k'}</td>
+            <td><span class="a-num ${d.built===d.count?'a-pos':''}">${d.built}</span><span style="color:var(--grey-3)">/${d.count}</span></td>
+          </tr>`}).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  // ── 3. Oldest unbuilt ─────────────────────────────────────────────────────
+  const today=new Date();
+  function waitStr(dateStr){
+    if(!dateStr)return'—';
+    const months=Math.round((today-new Date(dateStr))/(1000*60*60*24*30));
+    return months<12?months+'mo':(months/12).toFixed(1)+'yr';
+  }
+  const unbuilt=sets
+    .filter(s=>['Backlog','Backlog - Opened','In Progress'].includes(s.status)&&s.purchaseDate)
+    .sort((a,b)=>a.purchaseDate.localeCompare(b.purchaseDate)).slice(0,12);
+  
+  const aOldestTable = document.querySelector('#aOldestTable tbody');
+  if (aOldestTable) {
+    aOldestTable.innerHTML=unbuilt.map(s=>{
+      const n=String(s.setNo||'').replace(/\.0$/,'');
+      const months=Math.round((today-new Date(s.purchaseDate))/(1000*60*60*24*30));
+      return`<tr onclick="openDetail(${s.rowIndex})" style="cursor:pointer">
+        <td style="font-weight:700">${s.name.length>22?s.name.substring(0,22)+'…':s.name}<br><span style="font-size:.68rem;color:var(--grey-5)">#${n}</span></td>
+        <td><span class="a-pill">${(s.theme||'—').substring(0,12)}</span></td>
+        <td style="font-size:.78rem;color:var(--grey-5)">${s.purchaseDate.substring(0,7)}</td>
+        <td class="a-num ${months>24?'a-neg':''}">${waitStr(s.purchaseDate)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── 4. Investment tracker ─────────────────────────────────────────────────
+  const investSets = sets
+    .filter(s => s.rrp !== '' && parseFloat(s.rrp) > 0)
+    .map(s => {
+      const rrpVal = parseFloat(s.rrp);
+      const isNew = (s.condition || '').trim().toLowerCase() === 'new';
+      // Pick New or Used price based on set condition
+      const curVal = isNew ? (parseFloat(s.blNew) || 0) : (parseFloat(s.blUsed) || 0);
+      const gainVal = curVal - rrpVal;
+      
+      return {
+        ...s,
+        curVal: curVal,
+        gainVal: gainVal,
+        gainPct: (gainVal / rrpVal) * 100
+      };
+    })
+    .filter(s => s.curVal > 0) // Hide sets with no market value data
+    .sort((a, b) => b.gainVal - a.gainVal) // Sort by £ gain (descending)
+    .slice(0, 12);
+  
+  const aInvestTable = document.querySelector('#aInvestTable tbody');
+  if (aInvestTable) {
+    aInvestTable.innerHTML = investSets.length
+      ? investSets.map(s => {
+          const n = String(s.setNo || '').replace(/\.0$/, '');
+          const col = s.gainVal > 0 ? 'a-pos' : (s.gainVal < 0 ? 'a-neg' : '');
+          const sign = s.gainVal > 0 ? '+' : '';
+          return `<tr onclick="openDetail(${s.rowIndex})" style="cursor:pointer">
+            <td style="font-weight:700">${s.name.length > 22 ? s.name.substring(0, 22) + '…' : s.name}<br>
+                <span style="font-size:.68rem;color:var(--grey-5)">#${n}</span></td>
+            <td class="a-num">£${parseFloat(s.rrp).toFixed(0)}</td>
+            <td class="a-num">£${s.curVal.toFixed(0)}</td>
+            <td class="a-num ${col}">${sign}${Math.round(s.gainPct)}%</td>
+            <td class="a-num ${col}">${sign}£${Math.round(s.gainVal)}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--grey-5)">No pricing data available yet</td></tr>';
+  }
+
+  // ── 5. Retailer table ─────────────────────────────────────────────────────
+  const retData={};
+  sets.forEach(s=>{
+    const r=s.retailer||'Unknown';
+    if(!retData[r])retData[r]={count:0,spend:0,rrp:0};
+    retData[r].count++;
+    retData[r].spend+=(parseFloat(s.price)||0);
+    retData[r].rrp+=(parseFloat(s.rrp)||0);
+  });
+  const retRows=Object.entries(retData).sort((a,b)=>b[1].count-a[1].count);
+  const maxRet=retRows[0]?retRows[0][1].count:1;
+  const aRetailerTable = document.getElementById('aRetailerTable');
+  if (aRetailerTable) {
+    aRetailerTable.innerHTML=`
+      <table class="a-table">
+        <thead><tr><th>Retailer</th><th>Sets</th><th>Spend</th><th>RRP</th><th>Discount</th></tr></thead>
+        <tbody>${retRows.map(([ret,d])=>{
+          const disc=(d.spend>0 && d.rrp>0 && d.spend<d.rrp)?Math.round((d.rrp-d.spend)/d.rrp*100):null;
+          const clickRet = ret.replace(/'/g,"\\'");
+          return `
+          <tr>
+            <td style="font-weight:700"><span onclick="goToRetailer('${clickRet}')" style="cursor:pointer">${ret}</span></td>
+            <td><div class="a-bar-wrap"><div class="a-bar-track"><div class="a-bar-fill" style="width:${Math.round(d.count/maxRet*100)}%"></div></div><span class="a-num">${d.count}</span></div></td>
+            <td class="a-num">${d.spend>0?'£'+Math.round(d.spend):'—'}</td>
+            <td class="a-num">${d.rrp>0?'£'+Math.round(d.rrp):'—'}</td>
+            <td class="a-num" style="color:var(--grey-5)">${disc?'-'+disc+'%':'—'}</td>
+          </tr>`}).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  // ── 6. Top 10 by RRP ──────────────────────────────────────────────────────
+  const top10=sets
+    .filter(s=>s.rrp!==''&&parseFloat(s.rrp)>0)
+    .sort((a,b)=>parseFloat(b.rrp)-parseFloat(a.rrp))
+    .slice(0,10);
+  const cfg2=STATUS_CFG;
+  
+  const aTopRrpTable = document.querySelector('#aTopRrpTable tbody');
+  if (aTopRrpTable) {
+    aTopRrpTable.innerHTML=top10.map((s,i)=>{
+      const n=String(s.setNo||'').replace(/\.0$/,'');
+      const bc=(cfg2[s.status]||{badge:'b-theme'}).badge;
+      return`<tr onclick="openDetail(${s.rowIndex})" style="cursor:pointer">
+        <td class="a-num" style="color:var(--grey-3);width:24px">${i+1}</td>
+        <td style="font-weight:700">${s.name.length>22?s.name.substring(0,22)+'…':s.name}<br><span style="font-size:.68rem;color:var(--grey-5)">#${n}</span></td>
+        <td><span class="a-pill">${(s.theme||'—').substring(0,12)}</span></td>
+        <td class="a-num">£${parseFloat(s.rrp).toFixed(2)}</td>
+        <td><span class="badge ${bc}" style="font-size:.6rem">${s.status||'—'}</span></td>
+      </tr>`;
+    }).join('');
+  }
+
+  // ── 7. Ownership donut ────────────────────────────────────────────────────
+  const ownData={};
+  sets.forEach(s=>{const o=s.ownership||'Unspecified';ownData[o]=(ownData[o]||0)+1;});
+  const ownEntries=Object.entries(ownData).sort((a,b)=>b[1]-a[1]);
+  const ownColors=['#111111','#FFD600','#E53935','#1565C0','#2E7D32','#6A1B9A','#888888'];
+  
+  const canvas = document.getElementById('chartOwnership');
+  if (canvas) {
+    const wrap = canvas.closest('.chart-wrap');
+    
+    if(!document.getElementById('ownLegend')) {
+      wrap.style.display = 'flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '20px';
+      
+      const cWrap = document.createElement('div');
+      cWrap.style.width = '130px';
+      cWrap.style.height = '130px';
+      cWrap.style.flexShrink = '0';
+      canvas.parentNode.insertBefore(cWrap, canvas);
+      cWrap.appendChild(canvas);
+      
+      const lWrap = document.createElement('div');
+      lWrap.id = 'ownLegend';
+      lWrap.style.flex = '1';
+      wrap.appendChild(lWrap);
+    }
+    
+    const totalOwn = sets.length || 1;
+    document.getElementById('ownLegend').innerHTML = ownEntries.map((e,i) => {
+      const pct = Math.round(e[1] / totalOwn * 100);
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--divider)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:10px;height:10px;border-radius:3px;background:${ownColors[i%ownColors.length]}"></span>
+          <span style="font-size:.8rem;font-weight:600;color:var(--grey-7)">${e[0]}</span>
+        </div>
+        <div style="font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:800">${e[1]} <span style="font-family:'Barlow',sans-serif;font-size:.65rem;color:var(--grey-5);font-weight:600;margin-left:2px">(${pct}%)</span></div>
+      </div>`;
+    }).join('');
+    
+    const lastRow = document.getElementById('ownLegend').lastElementChild;
+    if(lastRow) lastRow.style.borderBottom = 'none';
+
+    if(chartOwnership){chartOwnership.destroy();}
+    chartOwnership=new Chart(canvas,{
+      type:'doughnut',
+      data:{
+        labels:ownEntries.map(e=>e[0]),
+        datasets:[{data:ownEntries.map(e=>e[1]),backgroundColor:ownColors.slice(0,ownEntries.length),borderWidth:1,borderColor:'#fff'}]
+      },
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        cutout:'45%',
+        plugins:{ legend:{display:false} },
+        layout:{padding:0}
+      }
+    });
+  }
+}
+
+window.addEventListener('load', startLoad);
+</script>

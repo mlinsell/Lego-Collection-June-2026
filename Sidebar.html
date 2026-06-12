@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: sans-serif; padding: 20px; text-align: center; }
+    .btn { width: 100%; padding: 14px; margin-bottom: 12px; background: #e8f5e9; border: 2px solid #2e7d32; color: #1b5e20; border-radius: 6px; font-weight: 800; font-size: 0.95rem; cursor: pointer; transition: transform 0.1s; }
+    .btn:active { transform: scale(0.96); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    #status { margin-top: 20px; font-size: 0.95rem; font-weight: 600; color: #444; min-height: 24px;}
+    #logArea { 
+      font-size: 0.75rem; color: #666; text-align: left; margin-top: 10px; 
+      height: 160px; overflow-y: auto; background: #fafafa; border-radius: 4px; 
+      padding: 10px; border: 1px solid #eee; display: none; line-height: 1.5;
+    }
+    .spinner { display: none; width: 24px; height: 24px; border: 3px solid #f3f3f3; border-top-color: #111; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 15px; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <h3 style="margin-top:0">Data Sync Tools</h3>
+  <p style="font-size:0.85rem; color:#666; margin-bottom:24px; line-height:1.4">
+    This tool scans your collection. If it finds any blanks or broken #N/A formulas in Theme, Set Name, Year, UK RRP, or Pieces, it pulls the data directly from the APIs and saves it as text.
+  </p>
+  
+  <div class="spinner" id="spin"></div>
+  
+  <button class="btn" id="btn1" onclick="run('fillMissingData')">Fill Missing Basic Data</button>
+
+  <div id="status">Ready.</div>
+  <div id="logArea"></div>
+  
+  <script>
+    let pollTimer = null;
+
+    function checkProgress() {
+      google.script.run.withSuccessHandler(res => {
+        // Only update UI if the process is still running
+        if (res && document.getElementById('spin').style.display === 'block') {
+          try {
+            const data = JSON.parse(res);
+            if (data.text) document.getElementById('status').textContent = data.text;
+            if (data.logs && data.logs.length > 0) {
+              const logEl = document.getElementById('logArea');
+              logEl.style.display = 'block';
+              logEl.innerHTML = data.logs.join('<br>');
+            }
+          } catch(e) {}
+        }
+      }).getSyncProgress();
+    }
+
+    function run(fn) {
+      const b1 = document.getElementById('btn1');
+      const stat = document.getElementById('status');
+      const spin = document.getElementById('spin');
+      const logEl = document.getElementById('logArea');
+      
+      b1.disabled = true;
+      spin.style.display = 'block';
+      stat.textContent = 'Starting process...';
+      stat.style.color = '#111';
+      logEl.innerHTML = '';
+      logEl.style.display = 'none';
+
+      // Start pinging the server for progress every 1.5 seconds
+      pollTimer = setInterval(checkProgress, 1500);
+
+      google.script.run
+        .withSuccessHandler(res => {
+          clearInterval(pollTimer);
+          spin.style.display = 'none';
+          b1.disabled = false;
+          
+          try {
+            const data = JSON.parse(res);
+            stat.textContent = data.text;
+            stat.style.color = data.text.includes('Error') ? 'red' : 'green';
+            if (data.logs && data.logs.length > 0) {
+              logEl.style.display = 'block';
+              logEl.innerHTML = data.logs.join('<br>');
+            }
+          } catch(e) {
+            stat.textContent = res;
+            stat.style.color = res.includes('Error') ? 'red' : 'green';
+          }
+        })
+        .withFailureHandler(err => {
+          clearInterval(pollTimer);
+          spin.style.display = 'none';
+          stat.textContent = 'Script Error: ' + err.message;
+          stat.style.color = 'red';
+          b1.disabled = false;
+        })[fn]();
+    }
+  </script>
+</body>
+</html>

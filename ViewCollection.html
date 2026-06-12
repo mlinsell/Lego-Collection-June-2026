@@ -1,0 +1,95 @@
+<div class="view" id="view-collection">
+  <div class="search-bar">
+    <div class="search-wrap">
+      <span class="search-ico">🔍</span>
+      <input class="search-input" id="srch" type="search" placeholder="Search name, number, theme, purpose…" oninput="filterSets()">
+    </div>
+  </div>
+  <div class="count-reset">
+    <span style="font-size:.75rem;font-weight:700;color:var(--grey-5)" id="collectionCount"></span>
+    <div style="display:flex; gap:16px;">
+      <button onclick="window.print()" style="background:none;border:none;font-size:.75rem;font-weight:800;color:var(--blue);cursor:pointer;padding:4px 0">🖨️ Print</button>
+      <button onclick="resetFilters()" style="background:none;border:none;font-size:.75rem;font-weight:800;color:var(--grey-5);cursor:pointer;padding:4px 0">Reset filters</button>
+    </div>
+  </div>
+  <div class="filter-bar" style="grid-template-columns:1fr 1fr 1fr;grid-template-rows:auto auto auto">
+    <div class="filter-wrap">
+      <label class="filter-label">Status</label>
+      <select class="filter-select" id="fStatus" onchange="filterSets()">
+        <option value="">All Statuses</option>
+        <option>Built</option><option>Backlog</option><option>In Progress</option>
+        <option>Backlog - Opened</option><option>Awaiting Delivery</option>
+        <option>Investment</option><option>Parted Out</option>
+        <option>Sell (BNIB)</option><option>Sell (Used)</option>
+      </select>
+      <span class="filter-arrow">▼</span>
+    </div>
+    <div class="filter-wrap">
+      <label class="filter-label">Theme</label>
+      <select class="filter-select" id="fTheme" onchange="filterSets()">
+        <option value="">All Themes</option>
+      </select>
+      <span class="filter-arrow">▼</span>
+    </div>
+    <div class="filter-wrap">
+      <label class="filter-label">Ownership</label>
+      <select class="filter-select" id="fOwnership" onchange="filterSets()">
+        <option value="">All</option>
+        <option>Personal</option><option>Business</option><option>Charlotte</option>
+        <option>Lizzy</option><option>Investment</option><option>Awaiting Delivery</option>
+      </select>
+      <span class="filter-arrow">▼</span>
+    </div>
+    <div class="filter-wrap">
+      <label class="filter-label">Build Time</label>
+      <select class="filter-select" id="fBuildCat" onchange="filterSets()">
+        <option value="">All Build Times</option>
+        <option>⚡ Quick Build</option>
+        <option>☀️ Afternoon Project</option>
+        <option>🏠 Weekend Build</option>
+        <option>📅 Multi-Day Build</option>
+        <option>🏔️ Epic Build</option>
+      </select>
+      <span class="filter-arrow">▼</span>
+    </div>
+    <div class="filter-wrap">
+      <label class="filter-label">Location</label>
+      <select class="filter-select" id="fLocation" onchange="filterSets()">
+        <option value="">All Locations</option>
+      </select>
+      <span class="filter-arrow">▼</span>
+    </div>
+    <div class="filter-wrap">
+      <label class="filter-label">Retailer</label>
+      <select class="filter-select" id="fRetailer" onchange="filterSets()">
+        <option value="">All Retailers</option>
+      </select>
+      <span class="filter-arrow">▼</span>
+    </div>
+    <div class="filter-wrap">
+      <label class="filter-label">Missing Data</label>
+      <select class="filter-select" id="fMissing" onchange="filterSets()">
+        <option value="">All</option>
+        <option value="price">Missing price paid</option>
+        <option value="retailer">Missing retailer</option>
+        <option value="ownership">Missing ownership</option>
+        <option value="location">Missing location</option>
+      </select>
+      <span class="filter-arrow">▼</span>
+    </div>
+    <div class="filter-wrap" style="grid-column:span 2">
+      <label class="filter-label">Sort by</label>
+      <select class="filter-select" id="fSort" onchange="filterSets()">
+        <option value="">Default (sheet order)</option>
+        <option value="rrp-desc">RRP - highest first</option>
+        <option value="pieces-desc">Piece count - highest first</option>
+        <option value="name-asc">Name - A to Z</option>
+        <option value="price-desc">Price paid - highest first</option>
+      </select>
+      <span class="filter-arrow">▼</span>
+    </div>
+  </div>
+  <div class="set-rows" id="setRows">
+    <div class="loading"><div class="spinner"></div>Loading…</div>
+  </div>
+</div>
