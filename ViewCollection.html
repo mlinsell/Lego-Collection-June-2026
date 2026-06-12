@@ -9,6 +9,7 @@
     <span style="font-size:.75rem;font-weight:700;color:var(--grey-5)" id="collectionCount"></span>
     <div style="display:flex; gap:16px;">
       <button onclick="window.print()" style="background:none;border:none;font-size:.75rem;font-weight:800;color:var(--blue);cursor:pointer;padding:4px 0">🖨️ Print</button>
+      <button onclick="exportSets()" style="background:none;border:none;font-size:.75rem;font-weight:800;color:var(--blue);cursor:pointer;padding:4px 0">📋 Export</button>
       <button onclick="resetFilters()" style="background:none;border:none;font-size:.75rem;font-weight:800;color:var(--grey-5);cursor:pointer;padding:4px 0">Reset filters</button>
     </div>
   </div>
@@ -17,7 +18,7 @@
       <label class="filter-label">Status</label>
       <select class="filter-select" id="fStatus" onchange="filterSets()">
         <option value="">All Statuses</option>
-        <option>Built</option><option>Backlog</option><option>In Progress</option>
+        <option>Built</option><option>Returning</option><option>Backlog</option><option>In Progress</option>
         <option>Backlog - Opened</option><option>Awaiting Delivery</option>
         <option>Investment</option><option>Parted Out</option>
         <option>Sell (BNIB)</option><option>Sell (Used)</option>

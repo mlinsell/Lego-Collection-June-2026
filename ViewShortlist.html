@@ -1,0 +1,129 @@
+<div class="view" id="view-shortlist">
+  <div class="search-bar">
+    <div class="search-wrap">
+      <span class="search-ico">🔎</span>
+      <input class="search-input" id="srchShortlist" type="search" placeholder="Search shortlist…" oninput="renderShortlist()">
+    </div>
+  </div>
+  <div class="count-reset">
+    <span style="font-size:.75rem;font-weight:700;color:var(--grey-5)" id="shortlistCount"></span>
+    <div style="display:flex; gap:16px;">
+      <button onclick="exportShortlist()" style="background:none;border:none;font-size:.75rem;font-weight:800;color:var(--blue);cursor:pointer;padding:4px 0">📋 Export</button>
+    </div>
+  </div>
+  <div class="set-rows" id="shortlistRows">
+    <div class="loading"><div class="spinner"></div>Loading…</div>
+  </div>
+</div>
+
+<script>
+let shortlistSets = [];
+
+function renderShortlist(){
+  const q = (document.getElementById('srchShortlist')?.value||'').toLowerCase();
+  google.script.run.withSuccessHandler(function(res){
+    if(res.error){ document.getElementById('shortlistRows').innerHTML = '<div class="empty"><p>Error loading shortlist</p></div>'; return; }
+    shortlistSets = res.sets || [];
+    renderShortlistFromList(q);
+  }).getShortlist();
+}
+
+function renderShortlistFromList(q){
+  const filter = (s)=>!q || s.name.toLowerCase().includes(q) || (s.setNo||'').toLowerCase().includes(q);
+  const sets = shortlistSets.filter(filter).sort((a,b)=>{
+    const pa = (a.shortlistPriority===''||a.shortlistPriority===undefined)?9999:a.shortlistPriority;
+    const pb = (b.shortlistPriority===''||b.shortlistPriority===undefined)?9999:b.shortlistPriority;
+    return pa - pb;
+  });
+  const countEl = document.getElementById('shortlistCount'); if(countEl) countEl.textContent = `${sets.length} set${sets.length!==1?'s':''}`;
+  document.getElementById('shortlistRows').innerHTML = sets.length?sets.map(setRowShortlistHtml).join(''):'<div class="empty"><p>No shortlisted sets.</p></div>';
+}
+
+function exportShortlist(){
+  const q = (document.getElementById('srchShortlist')?.value||'').toLowerCase();
+  const sets = shortlistSets.length ? shortlistSets : [];
+  if(!sets.length){
+    google.script.run.withSuccessHandler(function(res){
+      const exportSets = (res.sets||[]).filter(s=>!q || s.name.toLowerCase().includes(q) || (s.setNo||'').toLowerCase().includes(q));
+      if(!exportSets.length){ showToast('⚠️ No shortlisted sets'); return; }
+      copyShortlistExport(exportSets);
+    }).getShortlist();
+    return;
+  }
+  const exportSets = sets.filter(s=>!q || s.name.toLowerCase().includes(q) || (s.setNo||'').toLowerCase().includes(q));
+  if(!exportSets.length){ showToast('⚠️ No shortlisted sets'); return; }
+  copyShortlistExport(exportSets);
+}
+
+function copyShortlistExport(sets){
+  const headers = 'Set Number\tSet Name\tStatus\tBuild Time\tPieces\tTheme';
+  const rows = sets.map(s=>`${String(s.setNo||'').replace(/\.0$/,'')}\t${s.name}\t${s.status}\t${s.buildCat}\t${s.pieces?String(Math.round(s.pieces)):''}\t${s.theme}`).join('\n');
+  navigator.clipboard.writeText(headers+'\n'+rows).then(()=>showToast(`✅ Copied ${sets.length} set${sets.length!==1?'s':''} to clipboard`)).catch(()=>showToast('⚠️ Could not copy to clipboard'));
+}
+
+// clearShortlist removed — manage shortlist directly in the Google Sheet
+
+function setRowShortlistHtml(s){
+  const n=String(s.setNo||'').replace(/\.0$/,'');
+  const priority = (s.shortlistPriority!=='' && s.shortlistPriority!==undefined) ? s.shortlistPriority : '-';
+  return `<div class="set-row" onclick="openDetail(${s.rowIndex})">
+    <div class="set-img-wrap">${imgTag(n,'set-img',68)}</div>
+    <div class="set-info">
+      <div class="set-num">#${n||'—'}</div>
+      <div class="set-name">${s.name}</div>
+      <div class="set-badges">
+        ${s.theme?`<span class="badge b-theme">${s.theme}</span>`:''}
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-shortlist" onclick="event.stopPropagation();editPriority(event,${s.rowIndex})">#${priority}</button>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="btn-shortlist shortlist-move" onclick="event.stopPropagation();moveShortlistUp(${s.rowIndex})">⬆️</button>
+        <button class="btn-shortlist shortlist-move" onclick="event.stopPropagation();moveShortlistDown(${s.rowIndex})">⬇️</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function moveShortlistUp(rowIndex){ moveShortlist(rowIndex,'up'); }
+function moveShortlistDown(rowIndex){ moveShortlist(rowIndex,'down'); }
+
+function moveShortlist(rowIndex,direction){
+  const q = (document.getElementById('srchShortlist')?.value||'').toLowerCase();
+  const sets = shortlistSets.filter(s=>!q || s.name.toLowerCase().includes(q) || (s.setNo||'').toLowerCase().includes(q)).sort((a,b)=>{
+    const pa = (a.shortlistPriority===''||a.shortlistPriority===undefined)?9999:a.shortlistPriority;
+    const pb = (b.shortlistPriority===''||b.shortlistPriority===undefined)?9999:b.shortlistPriority;
+    return pa - pb;
+  });
+  const idx = sets.findIndex(s=>s.rowIndex===rowIndex);
+  if(idx===-1) return;
+  if(direction==='up' && idx===0) return;
+  if(direction==='down' && idx===sets.length-1) return;
+  const newOrder = sets.slice();
+  const swapIdx = direction==='up' ? idx-1 : idx+1;
+  const tmp = newOrder[swapIdx]; newOrder[swapIdx] = newOrder[idx]; newOrder[idx] = tmp;
+  const updates = newOrder.map((s,i)=>({ rowIndex: s.rowIndex, priority: i+1 }));
+
+  const originalPriorities = sets.map(s=>({ rowIndex: s.rowIndex, priority: s.shortlistPriority }));
+  updates.forEach(u=>{ const s = shortlistSets.find(x=>x.rowIndex===u.rowIndex); if(s) s.shortlistPriority = u.priority; });
+  shortlistSets.forEach(s=>{ const u = updates.find(u=>u.rowIndex===s.rowIndex); if(u) s.shortlistPriority = u.priority; });
+  renderShortlistFromList(q);
+  renderSets();
+
+  google.script.run.withSuccessHandler(function(res){
+    if(res && res.error){
+      showToast('⚠️ '+res.error);
+      originalPriorities.forEach(u=>{ const s = shortlistSets.find(x=>x.rowIndex===u.rowIndex); if(s) s.shortlistPriority = u.priority; });
+      renderShortlistFromList(q); renderSets();
+      return;
+    }
+    showToast('✅ Reordered shortlist');
+  }).withFailureHandler(function(e){
+    showToast('⚠️ '+e.message);
+    originalPriorities.forEach(u=>{ const s = shortlistSets.find(x=>x.rowIndex===u.rowIndex); if(s) s.shortlistPriority = u.priority; });
+    renderShortlistFromList(q); renderSets();
+  }).updateShortlistPriorities(updates);
+}
+</script>

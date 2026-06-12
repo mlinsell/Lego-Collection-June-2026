@@ -135,6 +135,7 @@ html,body{height:100%;font-family:'Barlow',sans-serif;background:var(--white);co
 .b-inprogress {background:#fff3e0;color:#bf360c;border:1px solid #ffcc80}
 .b-backlog-o  {background:#fce4ec;color:#880e4f;border:1px solid #f8bbd0}
 .b-awaiting   {background:#f3e5f5;color:#6a1b9a;border:1px solid #ce93d8}
+.b-returning  {background:#e8eaf6;color:#3949ab;border:1px solid #c5cae9}
 .b-investment {background:#e8f5e9;color:#2e7d32;border:1px solid #c8e6c9}
 .b-parted     {background:#ffebee;color:#c62828;border:1px solid #ffcdd2}
 .b-sell-bnib  {background:#e0f2f1;color:#00695c;border:1px solid #80cbc4}
@@ -165,6 +166,14 @@ html,body{height:100%;font-family:'Barlow',sans-serif;background:var(--white);co
 .btn-edit{background:var(--yellow);color:var(--black)}
 .btn-delete{background:var(--white);color:var(--red);border-color:var(--red)}
 
+/* Detail button flash animation when toggled */
+.btn-sheet.flash{animation:btnFlash .9s cubic-bezier(.2,.9,.2,1)}
+@keyframes btnFlash{
+  0%{transform:scale(1);box-shadow:0 0 0 rgba(0,0,0,0)}
+  30%{transform:scale(1.06);box-shadow:0 10px 20px rgba(0,0,0,0.12)}
+  100%{transform:scale(1);box-shadow:0 0 0 rgba(0,0,0,0)}
+}
+
 /* ── Form ── */
 .form-section{border-bottom:1px solid var(--divider)}
 .form-sec-hd{padding:10px 16px;font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:.75rem;text-transform:uppercase;letter-spacing:1px;color:var(--grey-5);background:var(--grey-0);border-bottom:1px solid var(--divider)}
@@ -185,6 +194,7 @@ html,body{height:100%;font-family:'Barlow',sans-serif;background:var(--white);co
 .s-active-inprogress {border-color:#bf360c;background:#fff3e0;color:#bf360c}
 .s-active-backlog-o  {border-color:#880e4f;background:#fce4ec;color:#880e4f}
 .s-active-awaiting   {border-color:#6a1b9a;background:#f3e5f5;color:#6a1b9a}
+.s-active-returning  {border-color:#3949ab;background:#e8eaf6;color:#3949ab}
 .s-active-investment {border-color:#2e7d32;background:#e8f5e9;color:#2e7d32}
 .s-active-parted     {border-color:#c62828;background:#ffebee;color:#c62828}
 .s-active-sell-bnib  {border-color:#00695c;background:#e0f2f1;color:#00695c}
@@ -207,6 +217,10 @@ html,body{height:100%;font-family:'Barlow',sans-serif;background:var(--white);co
 .btn-save:active{transform:scale(.98)}
 .btn-save:disabled{opacity:.5;cursor:not-allowed}
 .btn-del{width:calc(100% - 32px);margin:0 16px 20px;padding:11px;background:var(--white);color:var(--red);border:1.5px solid var(--red);border-radius:var(--radius-sm);font-family:'Barlow',sans-serif;font-weight:800;font-size:.88rem;cursor:pointer;display:none}
+
+.btn-shortlist{padding:6px 8px;border-radius:8px;border:1.5px solid var(--grey-3);background:var(--white);font-family:'Barlow',sans-serif;font-size:.75rem;font-weight:800;cursor:pointer;color:var(--grey-7)}
+.btn-shortlist:active{transform:scale(.98)}
+.btn-shortlist.shortlist-move{padding:10px 12px;font-size:1rem;border-radius:12px;}
 
 /* ── Analysis page ── */
 .analysis-section{border-bottom:1px solid var(--divider);padding:16px}

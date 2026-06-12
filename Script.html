@@ -16,6 +16,7 @@ let analysisMode = 'collection';
 
 const STATUS_CFG={
   'Built':             {badge:'b-built',      color:'#1565C0',active:'s-active-built'},
+  'Returning':         {badge:'b-returning',  color:'#3949AB',active:'s-active-returning'},
   'Backlog':           {badge:'b-backlog',     color:'#E65100',active:'s-active-backlog'},
   'In Progress':       {badge:'b-inprogress',  color:'#BF360C',active:'s-active-inprogress'},
   'Backlog - Opened':  {badge:'b-backlog-o',   color:'#880E4F',active:'s-active-backlog-o'},
@@ -95,6 +96,7 @@ function showView(name){
   if(name==='collection')renderSets();
   if(name==='dash')renderDash();
   if(name==='analysis')renderAnalysis();
+  if(name==='shortlist')renderShortlist();
 }
 
 function showAddForm(data,rowIdx){
@@ -143,7 +145,7 @@ function renderDash(){
     <div class="stat-cell"><div class="stat-val">${Math.round(pieces/1000)}k</div><div class="stat-lbl">Pieces</div></div>
     <div class="stat-cell"><div class="stat-val">${backlog}</div><div class="stat-lbl">Backlog</div></div>`;
 
-  const statusOrder=['Built','Backlog','In Progress','Backlog - Opened','Awaiting Delivery','Investment','Parted Out','Sell (BNIB)','Sell (Used)'];
+  const statusOrder=['Built','Returning','Backlog','In Progress','Backlog - Opened','Awaiting Delivery','Investment','Parted Out','Sell (BNIB)','Sell (Used)'];
   const counts={};allSets.forEach(s=>{counts[s.status]=(counts[s.status]||0)+1;});
   document.getElementById('statusList').innerHTML=statusOrder.filter(s=>counts[s]).map(s=>{
     const cfg=STATUS_CFG[s]||{color:'#888'};
@@ -249,6 +251,71 @@ function resetFilters(){
   filterSets();
 }
 
+function exportSets(){
+  const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  
+  const q          = (document.getElementById('srch').value||'').toLowerCase();
+  const fStatus    = val('fStatus');
+  const fTheme     = val('fTheme');
+  const fOwn       = val('fOwnership');
+  const fBuildCat  = val('fBuildCat');
+  const fLocation  = val('fLocation');
+  const fRetailer  = val('fRetailer');
+  const fCondition = val('fCondition');
+  const fMissing   = val('fMissing');
+
+  let filtered=allSets.filter(s=>{
+    if(fStatus   && s.status!==fStatus)     return false;
+    if(fTheme    && s.theme!==fTheme)       return false;
+    if(fOwn      && s.ownership!==fOwn)     return false;
+    if(fBuildCat && s.buildCat!==fBuildCat) return false;
+    if(fLocation && s.location!==fLocation) return false;
+    if(fRetailer && s.retailer!==fRetailer) return false;
+    if(fCondition&& s.condition!==fCondition) return false;
+    if(fMissing==='price'    && (s.price    !=='' && s.price    !=null)) return false;
+    if(fMissing==='retailer' && (s.retailer !=='' && s.retailer !=null)) return false;
+    if(fMissing==='ownership'&& (s.ownership!=='' && s.ownership!=null)) return false;
+    if(fMissing==='location' && (s.location !=='' && s.location !=null)) return false;
+    if(q && !s.name.toLowerCase().includes(q)
+         && !(s.setNo||'').toLowerCase().includes(q)
+         && !(s.theme||'').toLowerCase().includes(q)
+         && !(s.purpose||'').toLowerCase().includes(q)
+         && !(s.location||'').toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  if(filtered.length===0){
+    showToast('⚠️ No sets to export');
+    return;
+  }
+
+  const headers = 'Set Number\tSet Name\tStatus\tBuild Time\tPieces\tTheme';
+  const rows = filtered.map(s => {
+    const setNo = String(s.setNo||'').replace(/\.0$/,'');
+    const pieces = s.pieces ? String(Math.round(s.pieces)) : '';
+    return `${setNo}\t${s.name}\t${s.status}\t${s.buildCat}\t${pieces}\t${s.theme}`;
+  }).join('\n');
+  
+  const exportText = headers + '\n' + rows;
+  const exportBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Export'));
+
+  navigator.clipboard.writeText(exportText).then(() => {
+    if(exportBtn) {
+      const originalText = exportBtn.textContent;
+      exportBtn.textContent = '✅ Copied!';
+      exportBtn.disabled = true;
+      setTimeout(() => {
+        exportBtn.textContent = originalText;
+        exportBtn.disabled = false;
+      }, 2000);
+    }
+    showToast(`✅ ${filtered.length} set${filtered.length!==1?'s':''} ready to paste`);
+  }).catch(err => {
+    showToast('⚠️ Could not copy to clipboard');
+    console.error(err);
+  });
+}
+
 function renderSets(){buildFilterDropdowns();filterSets();}
 
 function setRowHtml(s){
@@ -282,10 +349,76 @@ function setRowHtml(s){
       ${priceStr?`<span class="set-price">${priceStr}</span>`:''}
       ${rrpStr&&rrpStr!==priceStr?`<span style="font-size:.7rem;color:var(--grey-3);font-weight:600;white-space:nowrap">RRP ${rrpStr}</span>`:''}
       ${discountPct?`<span style="font-size:.7rem;color:var(--grey-5);font-weight:700;white-space:nowrap">-${discountPct}%</span>`:''}
-      <span class="set-chevron">›</span>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        ${s.status!=='Built'?`<div style="display:flex;gap:6px;align-items:center">
+            <button class="btn-shortlist" onclick="toggleShortlist(event,${s.rowIndex})">${s.shortlist? '⭐ Shortlisted' : '☆ Shortlist'}</button>
+            ${s.shortlist?`<button class="btn-shortlist" onclick="editPriority(event,${s.rowIndex})">#${s.shortlistPriority||'-'}</button>`:''}
+          </div>` : ''}
+        <span class="set-chevron">›</span>
+      </div>
     </div>
   </div>`;
 }
+
+function toggleShortlist(e,rowIndex){
+  e.stopPropagation();
+  const s = allSets.find(x=>x.rowIndex===rowIndex);
+  if(!s) return;
+  if(s.status === 'Built') { showToast('⚠️ Built sets cannot be shortlisted'); return; }
+  const newVal = !s.shortlist;
+  const cb = (res)=>{
+    if(res && res.error){ showToast('⚠️ '+res.error); return; }
+    s.shortlist = newVal;
+    if(!newVal) s.shortlistPriority = '';
+    renderSets();
+    try{ renderShortlist(); }catch(e){}
+    showToast(newVal? '⭐ Added to shortlist' : 'Removed from shortlist');
+  };
+  google.script.run.withSuccessHandler(cb).withFailureHandler(function(e){
+    showToast('⚠️ '+e.message);
+    s.shortlist = !newVal;
+    if(!newVal) s.shortlistPriority = s.shortlistPriority || '';
+    renderSets();
+    try{ renderShortlist(); }catch(e){}
+  }).setShortlist(rowIndex,newVal);
+}
+
+function editPriority(e,rowIndex){
+  e.stopPropagation();
+  const s = allSets.find(x=>x.rowIndex===rowIndex); if(!s || !s.shortlist) return;
+  const cur = s.shortlistPriority!=='' && s.shortlistPriority!==undefined ? s.shortlistPriority : '';
+  const v = prompt('Set shortlist priority (numeric, lower = higher priority)', cur);
+  if(v===null) return;
+  const num = v===''? '' : parseInt(v);
+  if (v !== '' && isNaN(num)) { showToast('⚠️ Priority must be a number'); return; }
+  google.script.run.withSuccessHandler(function(res){
+    if(res && res.error){ showToast('⚠️ '+res.error); return; }
+    s.shortlistPriority = num;
+    renderSets();
+    renderShortlist();
+    showToast('✅ Priority saved');
+  }).withFailureHandler(function(e){ showToast('⚠️ '+e.message); }).setShortlistPriority(rowIndex, num);
+}
+
+function toggleShortlistFromDetail(rowIndex){
+  const s = allSets.find(x=>x.rowIndex===rowIndex); if(!s) return;
+  if(s.status === 'Built') { showToast('⚠️ Built sets cannot be shortlisted'); return; }
+  const newVal = !s.shortlist;
+  google.script.run.withSuccessHandler(function(res){
+    if(res && res.error){ showToast('⚠️ '+res.error); return; }
+    s.shortlist = newVal;
+    if(!newVal) s.shortlistPriority = '';
+    renderSets();
+    try{ renderShortlist(); }catch(e){}
+    openDetail(rowIndex);
+    setTimeout(()=>{
+      const b = document.getElementById('detail-shortlist-btn');
+      if(b){ b.classList.add('flash'); setTimeout(()=>b.classList.remove('flash'),900); }
+    },80);
+    showToast(newVal? '⭐ Added to shortlist' : 'Removed from shortlist');
+  }).withFailureHandler(function(e){ showToast('⚠️ '+e.message); }).setShortlist(rowIndex,newVal);
+}
+
 
 function openDetail(rowIndex){
   const s=allSets.find(x=>x.rowIndex===rowIndex);if(!s)return;
@@ -321,8 +454,9 @@ function openDetail(rowIndex){
       ${rows.map(([l,v])=>`<div class="detail-row"><span class="dl">${l}</span><span class="dv">${v}</span></div>`).join('')}
     </div>
     <div class="sheet-actions">
-      <button class="btn-sheet btn-edit" onclick="closeDetail();showAddForm(${JSON.stringify(s).replace(/"/g,'&quot;')},${rowIndex})">✏️ Edit</button>
-      <button class="btn-sheet btn-delete" onclick="closeDetail();delSet(${rowIndex})">🗑️ Delete</button>
+        <button class="btn-sheet btn-edit" onclick="closeDetail();showAddForm(${JSON.stringify(s).replace(/"/g,'&quot;')},${rowIndex})">✏️ Edit</button>
+        ${s.status!=='Built'?`<button class="btn-sheet" id="detail-shortlist-btn" onclick="toggleShortlistFromDetail(${rowIndex})">${s.shortlist? '⭐ Shortlisted' : '☆ Shortlist'}</button>`:''}
+        <button class="btn-sheet btn-delete" onclick="closeDetail();delSet(${rowIndex})">🗑️ Delete</button>
     </div>`;
   document.getElementById('detailOL').classList.add('open');
 }
@@ -364,7 +498,7 @@ function pickStatus(status){
   document.getElementById('status-error').style.display = 'none';
   const cfg=STATUS_CFG[status]||{};
   const labelMap={
-    '🏗️ Built':'Built','📦 Backlog':'Backlog','🔨 In Progress':'In Progress',
+    '🏗️ Built':'Built','🔁 Returning':'Returning','📦 Backlog':'Backlog','🔨 In Progress':'In Progress',
     '📂 Backlog - Opened':'Backlog - Opened','🚚 Awaiting Delivery':'Awaiting Delivery',
     '💰 Investment':'Investment','🔩 Parted Out':'Parted Out',
     '🏷️ Sell (BNIB)':'Sell (BNIB)','🏷️ Sell (Used)':'Sell (Used)',

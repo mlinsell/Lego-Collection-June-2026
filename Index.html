@@ -50,6 +50,7 @@
 
 <?!= include('ViewDashboard'); ?>
 <?!= include('ViewCollection'); ?>
+<?!= include('ViewShortlist'); ?>
 
 <div class="view" id="view-form">
   <div class="form-wrap">
@@ -113,6 +114,7 @@
           <button class="s-btn" onclick="pickStatus('Parted Out')">🔩 Parted Out</button>
           <button class="s-btn" onclick="pickStatus('Sell (BNIB)')">🏷️ Sell (BNIB)</button>
           <button class="s-btn" onclick="pickStatus('Sell (Used)')">🏷️ Sell (Used)</button>
+          <button class="s-btn" onclick="pickStatus('Returning')">🔁 Returning</button>
         </div>
       </div>
     </div>
@@ -209,6 +211,7 @@
     Collection
   </button>
   <button class="nav-btn" id="nav-analysis" onclick="showView('analysis')" disabled><span class="nav-icon">📈</span>Analysis</button>
+  <button class="nav-btn" id="nav-shortlist" onclick="showView('shortlist')" disabled><span class="nav-icon">⭐</span>Shortlist</button>
 </nav>
 </div>
 

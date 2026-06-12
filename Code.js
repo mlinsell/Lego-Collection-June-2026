@@ -5,6 +5,9 @@
 const SPREADSHEET_ID   = '13F9LqpkDi5iw_kUnnWrYy5nFizeGmM3svln-S77m0EI';
 const COLLECTION_SHEET = 'Collection';
 const DATA_START_ROW   = 2;
+const SETS_CACHE_KEY = 'sets_cache_v1';
+const SHORTLIST_CACHE_KEY = 'shortlist_cache_v1';
+const SETS_CACHE_TTL = 60; // seconds
 
 // ── Collection column positions (1-indexed) ───────────────────────────────────
 const COL = {
@@ -30,6 +33,8 @@ const COL = {
   BL_USED:       20,  // T  BrickLink Used    - VLOOKUP (Dynamic)
   BACKLOG:       21,  // U  Backlog           - formula (read-only)
   CONDITION:     22,  // V  Condition         - formula (read-only)
+  SHORTLIST:     23,  // W  Shortlist         - user flag (TRUE/FALSE)
+  SHORTLIST_PRIORITY: 24, // X Shortlist priority - numeric rank
 };
 
 function doGet() {
@@ -92,17 +97,26 @@ function calcBuildCategory(hours) {
 
 function getSets() {
   try {
+    const cache = CacheService.getUserCache();
+    const cached = cache.get(SETS_CACHE_KEY);
+    if (cached) {
+      try { return JSON.parse(cached); } catch(e) { /* fall through to refresh */ }
+    }
     const sheet = getSpreadsheet().getSheetByName(COLLECTION_SHEET);
     if (!sheet) return { error: 'Tab not found.' };
     const lastRow = sheet.getLastRow();
     if (lastRow < DATA_START_ROW) return { sets: [] };
-    const data = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, 22).getValues();
+    const data = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, 24).getValues();
 
     const sets = data.map((row, i) => {
       if (!row[0] && !row[1]) return null;
       const pieces = toInt(row[COL.PIECES - 1]);
       const theme  = String(row[COL.THEME - 1] || '');
       const hrs    = calcBuildHours(pieces, theme);
+      const shortlistRaw = data[i][COL.SHORTLIST - 1];
+      const shortlist = (shortlistRaw === true) || (String(shortlistRaw||'').toLowerCase() === 'true') || (shortlistRaw === 1);
+      const priorityRaw = data[i][COL.SHORTLIST_PRIORITY - 1];
+      const shortlistPriority = (priorityRaw === undefined || priorityRaw === '') ? '' : Number(priorityRaw);
       return {
         rowIndex:     DATA_START_ROW + i,
         setNo:        String(row[COL.SET_ID - 1] || '').trim(),
@@ -126,17 +140,78 @@ function getSets() {
         condition:    String(row[COL.CONDITION - 1] || ''),
         buildHrs:     hrs,
         buildCat:     calcBuildCategory(hrs),
+        shortlist:    shortlist,
+        shortlistPriority: shortlistPriority,
+      };
+    }).filter(Boolean);
+    try{ cache.put(SETS_CACHE_KEY, JSON.stringify({ sets }), SETS_CACHE_TTL); }catch(e){}
+    return { sets };
+  } catch(e) { return { error: e.message }; }
+}
+
+function clearSetsCache(){
+  try{ CacheService.getUserCache().remove(SETS_CACHE_KEY); }catch(e){}
+  try{ CacheService.getUserCache().remove(SHORTLIST_CACHE_KEY); }catch(e){}
+}
+
+function getShortlist(){
+  try {
+    const sheet = getSpreadsheet().getSheetByName(COLLECTION_SHEET);
+    if (!sheet) return { error: 'Tab not found.' };
+    const lastRow = sheet.getLastRow();
+    if (lastRow < DATA_START_ROW) return { sets: [] };
+    const data = sheet.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, 24).getValues();
+    const sets = data.map((row, i) => {
+      if (!row[0] && !row[1]) return null;
+      const shortlistRaw = data[i][COL.SHORTLIST - 1];
+      const shortlist = (shortlistRaw === true) || (String(shortlistRaw||'').toLowerCase() === 'true') || (shortlistRaw === 1);
+      if (!shortlist) return null;
+      const pieces = toInt(row[COL.PIECES - 1]);
+      const theme  = String(row[COL.THEME - 1] || '');
+      const hrs    = calcBuildHours(pieces, theme);
+      const priorityRaw = data[i][COL.SHORTLIST_PRIORITY - 1];
+      const shortlistPriority = (priorityRaw === undefined || priorityRaw === '') ? '' : Number(priorityRaw);
+      return {
+        rowIndex: DATA_START_ROW + i,
+        setNo: String(row[COL.SET_ID - 1] || '').trim(),
+        name: String(row[COL.NAME - 1] || ''),
+        status: String(row[COL.STATUS - 1] || ''),
+        theme: theme,
+        pieces: pieces,
+        buildHrs: hrs,
+        buildCat: calcBuildCategory(hrs),
+        shortlist: shortlist,
+        shortlistPriority: shortlistPriority,
       };
     }).filter(Boolean);
     return { sets };
   } catch(e) { return { error: e.message }; }
 }
 
+function applyRowUpdates(sheet, rowNumber, updates){
+  try{
+    const cols = Object.keys(updates).map(c => parseInt(c,10)).sort((a,b)=>a-b);
+    if (cols.length === 0) return;
+    const minCol = cols[0];
+    const maxCol = cols[cols.length - 1];
+    const width = maxCol - minCol + 1;
+    const rowVals = new Array(width).fill('');
+    cols.forEach(col => { rowVals[col - minCol] = updates[col]; });
+    sheet.getRange(rowNumber, minCol, 1, width).setValues([rowVals]);
+  }catch(e){
+    // best-effort: fall back to individual writes if batch fails
+    try{
+      cols.forEach(col => { sheet.getRange(rowNumber, col).setValue(updates[col]); });
+    }catch(e2){}
+  }
+}
+
 function addSet(data) {
   try {
     const sheet = getSpreadsheet().getSheetByName(COLLECTION_SHEET);
     const nextRow = Math.max(sheet.getLastRow() + 1, DATA_START_ROW);
-    sheet.getRange(nextRow, 1, 1, 22).setValues([buildRow(data, nextRow)]);
+    sheet.getRange(nextRow, 1, 1, 24).setValues([buildRow(data, nextRow)]);
+    clearSetsCache();
     return { success: true, rowIndex: nextRow };
   } catch(e) { return { error: e.message }; }
 }
@@ -144,7 +219,8 @@ function addSet(data) {
 function updateSet(rowIndex, data) {
   try {
     const sheet = getSpreadsheet().getSheetByName(COLLECTION_SHEET);
-    sheet.getRange(rowIndex, 1, 1, 22).setValues([buildRow(data, rowIndex)]);
+    sheet.getRange(rowIndex, 1, 1, 24).setValues([buildRow(data, rowIndex)]);
+    clearSetsCache();
     return { success: true };
   } catch(e) { return { error: e.message }; }
 }
@@ -152,6 +228,7 @@ function updateSet(rowIndex, data) {
 function deleteSet(rowIndex) {
   try {
     getSpreadsheet().getSheetByName(COLLECTION_SHEET).deleteRow(rowIndex);
+    clearSetsCache();
     return { success: true };
   } catch(e) { return { error: e.message }; }
 }
@@ -180,7 +257,44 @@ function buildRow(data, r) {
     `=VLOOKUP(A${r},'Brickset-List Export'!B:AQ,42,FALSE)`, // T: BL Used
     `=VLOOKUP(C${r},Inputs!A:C,2,FALSE)`, // U: Backlog 
     `=VLOOKUP(C${r},Inputs!A:C,3,FALSE)`  // V: Condition 
+    , data.shortlist ? true : ''
+    , data.shortlistPriority !== undefined && data.shortlistPriority !== '' ? parseInt(data.shortlistPriority) : ''
   ];
+}
+
+function setShortlist(rowIndex, value){
+  try{
+    const sheet = getSpreadsheet().getSheetByName(COLLECTION_SHEET);
+    sheet.getRange(rowIndex, COL.SHORTLIST).setValue(value?true:'');
+    // If removing from shortlist, also clear the priority cell
+    if(!value){
+      sheet.getRange(rowIndex, COL.SHORTLIST_PRIORITY).setValue('');
+    }
+    clearSetsCache();
+    return { success: true };
+  }catch(e){ return { error: e.message }; }
+}
+
+function setShortlistPriority(rowIndex, priority){
+  try{
+    const sheet = getSpreadsheet().getSheetByName(COLLECTION_SHEET);
+    sheet.getRange(rowIndex, COL.SHORTLIST_PRIORITY).setValue(priority!==''?parseInt(priority):'');
+    clearSetsCache();
+    return { success: true };
+  }catch(e){ return { error: e.message }; }
+}
+
+function updateShortlistPriorities(updates){
+  try{
+    const sheet = getSpreadsheet().getSheetByName(COLLECTION_SHEET);
+    updates.forEach(u=>{
+      const r = u.rowIndex;
+      const p = (u.priority === undefined || u.priority === '') ? '' : parseInt(u.priority);
+      sheet.getRange(r, COL.SHORTLIST_PRIORITY).setValue(p);
+    });
+    clearSetsCache();
+    return { success: true };
+  }catch(e){ return { error: e.message }; }
 }
 
 // ── API Logic ─────────────────────────────────────────────────────────────────
@@ -323,17 +437,18 @@ function fillMissingData() {
         Utilities.sleep(1200); 
       }
 
-      // Write ONLY the fields that were actually missing.
-      // Now using !isMissing to ensure it catches valid 0 returns from the API.
-      if (isMissing(theme) && !isMissing(newTheme)) { sheet.getRange(i + 1, COL.THEME).setValue(newTheme); actuallyUpdated.push('Theme'); }
-      if (isMissing(nameLookup) && !isMissing(newName)) { sheet.getRange(i + 1, COL.NAME_LOOKUP).setValue(newName); actuallyUpdated.push('Name'); }
-      if (isMissing(year) && !isMissing(newYear)) { sheet.getRange(i + 1, COL.YEAR).setValue(newYear); actuallyUpdated.push('Year'); }
-      if (isMissing(pieces) && !isMissing(newPieces)) { sheet.getRange(i + 1, COL.PIECES).setValue(newPieces); actuallyUpdated.push('Pieces'); }
-      if (isMissing(rrp) && !isMissing(newRrp)) { sheet.getRange(i + 1, COL.RRP).setValue(newRrp); actuallyUpdated.push('RRP'); }
+      // Prepare batched updates for this row to minimise calls to the Sheet service
+      const rowUpdates = {};
+      if (isMissing(theme) && !isMissing(newTheme)) { rowUpdates[COL.THEME] = newTheme; actuallyUpdated.push('Theme'); }
+      if (isMissing(nameLookup) && !isMissing(newName)) { rowUpdates[COL.NAME_LOOKUP] = newName; actuallyUpdated.push('Name'); }
+      if (isMissing(year) && !isMissing(newYear)) { rowUpdates[COL.YEAR] = newYear; actuallyUpdated.push('Year'); }
+      if (isMissing(pieces) && !isMissing(newPieces)) { rowUpdates[COL.PIECES] = newPieces; actuallyUpdated.push('Pieces'); }
+      if (isMissing(rrp) && !isMissing(newRrp)) { rowUpdates[COL.RRP] = newRrp; actuallyUpdated.push('RRP'); }
 
       if (actuallyUpdated.length > 0) {
+        applyRowUpdates(sheet, i + 1, rowUpdates);
         logs.unshift(`✅ Set <b>${setID}</b>: Fetched ${actuallyUpdated.join(', ')}`);
-        if (logs.length > 8) logs.pop(); 
+        if (logs.length > 8) logs.pop();
         count++;
       }
     }
